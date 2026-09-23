@@ -1,92 +1,86 @@
 * {
   box-sizing: border-box;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Courier New', Courier, monospace;
   margin: 0;
   padding: 0;
+  user-select: none;
 }
 
 body {
-  background-color: #121212;
+  background-color: #0f0f14;
   color: #ffffff;
   display: flex;
   justify-content: center;
-  padding: 20px;
+  align-items: center;
+  min-height: 100vh;
 }
 
 #game-container {
   width: 100%;
-  max-width: 800px;
+  max-width: 840px;
+  padding: 10px;
 }
 
 #hud {
   display: flex;
   justify-content: space-between;
-  background-color: #1e1e24;
-  padding: 15px;
-  font-size: 1.2rem;
+  align-items: center;
+  background-color: #1a1a24;
+  padding: 12px 20px;
+  border: 3px solid #333344;
+  border-radius: 6px;
+  margin-bottom: 10px;
   font-weight: bold;
-  border-radius: 8px;
-  margin-bottom: 15px;
-  border: 1px solid #333;
 }
 
-#canvas-container {
-  position: relative;
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-#gameCanvas {
-  background-color: #2b2b36;
-  border: 3px solid #444;
-  border-radius: 8px;
-}
-
-#combat-controls-tip {
-  margin-top: 6px;
-  font-size: 0.85rem;
-  color: #aaa;
-}
-
-#ui-panels {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 15px;
-}
-
-.panel {
-  background-color: #1e1e24;
-  border: 1px solid #333;
-  padding: 15px;
-  border-radius: 8px;
+#hp-container {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 10px;
 }
 
-button {
-  background-color: #2563eb;
-  color: white;
-  border: none;
-  padding: 10px;
+#player-hp-bar-bg {
+  width: 120px;
+  height: 14px;
+  background-color: #441111;
+  border: 2px solid #000;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#player-hp-bar-fill {
+  width: 100%;
+  height: 100%;
+  background-color: #22c55e;
+  transition: width 0.1s;
+}
+
+#canvas-container {
+  text-align: center;
+}
+
+#gameCanvas {
+  background-color: #1e1e28;
+  border: 4px solid #3b3b4f;
   border-radius: 6px;
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+
+#controls-tip {
+  margin-top: 6px;
+  font-size: 0.9rem;
+  color: #8888aa;
+}
+
+#status-banner {
+  margin-top: 10px;
+  padding: 10px;
+  background-color: #1a1a24;
+  border: 2px solid #333344;
+  border-radius: 6px;
+  text-align: center;
   font-weight: bold;
-  cursor: pointer;
-  transition: background-color 0.2s;
+  min-height: 20px;
+  color: #3b82f6;
 }
-
-button:hover {
-  background-color: #1d4ed8;
-}
-
-#loot-message {
-  font-weight: bold;
-  min-height: 24px;
-}
-
-/* Rarity Colors */
-.rarity-Common { color: #aaaaaa; }
-.rarity-Rare { color: #3b82f6; }
-.rarity-Epic { color: #a855f7; }
-.rarity-Legendary { color: #eab308; }
-.rarity-BROKEN { color: #ef4444; font-weight: bold; text-shadow: 0 0 5px #ef4444; }
