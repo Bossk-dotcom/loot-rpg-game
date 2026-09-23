@@ -1,0 +1,92 @@
+* {
+  box-sizing: border-box;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #121212;
+  color: #ffffff;
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+}
+
+#game-container {
+  width: 100%;
+  max-width: 800px;
+}
+
+#hud {
+  display: flex;
+  justify-content: space-between;
+  background-color: #1e1e24;
+  padding: 15px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  border: 1px solid #333;
+}
+
+#canvas-container {
+  position: relative;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+#gameCanvas {
+  background-color: #2b2b36;
+  border: 3px solid #444;
+  border-radius: 8px;
+}
+
+#combat-controls-tip {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: #aaa;
+}
+
+#ui-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 15px;
+}
+
+.panel {
+  background-color: #1e1e24;
+  border: 1px solid #333;
+  padding: 15px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+button {
+  background-color: #2563eb;
+  color: white;
+  border: none;
+  padding: 10px;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: #1d4ed8;
+}
+
+#loot-message {
+  font-weight: bold;
+  min-height: 24px;
+}
+
+/* Rarity Colors */
+.rarity-Common { color: #aaaaaa; }
+.rarity-Rare { color: #3b82f6; }
+.rarity-Epic { color: #a855f7; }
+.rarity-Legendary { color: #eab308; }
+.rarity-BROKEN { color: #ef4444; font-weight: bold; text-shadow: 0 0 5px #ef4444; }

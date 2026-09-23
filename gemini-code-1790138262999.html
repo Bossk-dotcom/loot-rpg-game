@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loot & Battle Action RPG</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container">
+    <!-- Top HUD -->
+    <header id="hud">
+      <div>Area: <span id="area-display">1</span></div>
+      <div>Gold: 💰<span id="gold-display">0</span></div>
+      <div>Player HP: <span id="hp-display">100/100</span></div>
+    </header>
+
+    <!-- Canvas for Combat & Movement -->
+    <div id="canvas-container">
+      <canvas id="gameCanvas" width="600" height="350"></canvas>
+      <div id="combat-controls-tip">Use <b>WASD</b> or <b>Arrow Keys</b> to Move/Dodge | Click Canvas to Attack</div>
+    </div>
+
+    <!-- Interactive Dashboards -->
+    <main id="ui-panels">
+      <!-- Training Scarecrow Area -->
+      <section class="panel">
+        <h2>🎯 Scarecrow Dummy</h2>
+        <p>Hit the dummy to level up your base attack power!</p>
+        <button id="hit-dummy-btn">Hit Dummy 🗡️</button>
+        <p>Progress to Next Power: <span id="dummy-hits">0</span> / <span id="dummy-req">10</span></p>
+        <p>Base Attack Power: <span id="attack-display">10</span></p>
+      </section>
+
+      <!-- Chest Shop -->
+      <section class="panel">
+        <h2>📦 Chest Shop</h2>
+        <p>Open chests to find new weapons, shields, potions, or skills.</p>
+        <button id="buy-chest-btn">Buy Chest (💰<span id="chest-cost">50</span>)</button>
+        <div id="loot-message"></div>
+      </section>
+
+      <!-- Inventory & Equipment -->
+      <section class="panel">
+        <h2>🎒 Equipped Gear</h2>
+        <p><b>Sword:</b> <span id="eq-sword">Wooden Sword (Common)</span></p>
+        <p><b>Shield:</b> <span id="eq-shield">None</span></p>
+        <p><b>Potions:</b> <span id="eq-potions">2x Health Potion</span></p>
+        <p><b>Active Skill:</b> <span id="eq-skill">None</span></p>
+        <button id="use-potion-btn">Drink Potion</button>
+      </section>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
