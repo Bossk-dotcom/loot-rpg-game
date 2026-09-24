@@ -23,6 +23,8 @@ body {
 
 #hud {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   justify-content: space-between;
   align-items: center;
   background-color: #1a1a24;
@@ -60,6 +62,8 @@ body {
 }
 
 #gameCanvas {
+  max-width: 100%;
+  height: auto;
   background-color: #1e1e28;
   border: 4px solid #3b3b4f;
   border-radius: 6px;
@@ -84,3 +88,45 @@ body {
   min-height: 20px;
   color: #3b82f6;
 }
+
+#objective-text {
+  margin: 12px 0;
+  color: #c4c4d6;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+#victory-dialog {
+  width: min(500px, calc(100% - 32px));
+  margin: auto;
+  padding: 32px;
+  color: #ffffff;
+  background: #1a1a24;
+  border: 3px solid #eab308;
+  border-radius: 12px;
+  text-align: center;
+  box-shadow: 0 20px 80px #0009;
+}
+
+#victory-dialog::backdrop { background: #090911d9; }
+.victory-icon { font-size: 42px; color: #eab308; }
+.victory-label { color: #eab308; letter-spacing: 2px; font-size: 12px; }
+#victory-dialog h1 { margin: 12px 0; font-size: 28px; }
+#victory-dialog p { line-height: 1.6; }
+#victory-summary { margin: 20px 0; color: #c4c4d6; }
+#restart-button {
+  padding: 14px 18px;
+  color: #17140a;
+  background: #eab308;
+  border: 0;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+}
+#restart-button:hover { background: #facc15; }
+#restart-button:focus-visible, #gameCanvas:focus-visible {
+  outline: 3px solid #38bdf8;
+  outline-offset: 4px;
+}
+#victory-dialog .restart-note { margin-top: 16px; color: #aaaabd; font-size: 12px; }

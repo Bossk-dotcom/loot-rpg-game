@@ -2,18 +2,22 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 // --- Game State ---
-const state = {
+const FINAL_ZONE = 5;
+const WELCOME_MESSAGE = "Welcome to Town! Train on the dummy, buy swords, then defeat the boss and escape through the toll gate.";
+const createInitialState = () => ({
   zone: 0, // 0: Town, 1: Goblins, 2: Orcs, 3: Knights, 4: Dark Knights, 5: Boss
   gold: 0,
   hp: 100,
   maxHp: 100,
   totalAttackPower: 10,
   tollCost: 500,
-  equippedSword: { name: "Starter Sword", power: 1, rarity: "Common" }
-};
+  equippedSword: { name: "Starter Sword", power: 1, rarity: "Common" },
+  won: false
+});
+const state = createInitialState();
 
 // Player Object
-const player = {
+const createInitialPlayer = () => ({
   x: 100,
   y: 200,
   size: 28,
@@ -21,18 +25,66 @@ const player = {
   facing: "right", // "up", "down", "left", "right"
   swinging: false,
   swingTimer: 0
-};
+});
+const player = createInitialPlayer();
 
 // Key Tracking
 const keys = {};
 window.addEventListener("keydown", (e) => {
+  if (state.won || e.ctrlKey || e.metaKey || e.altKey) return;
+  if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(e.key.toLowerCase())) {
+    e.preventDefault();
+  }
   keys[e.key.toLowerCase()] = true;
-  if (e.key === " " || e.code === "Space") {
+  if (!e.repeat && (e.key === " " || e.code === "Space")) {
     triggerAttack();
   }
 });
 window.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
-canvas.addEventListener("mousedown", triggerAttack);
+canvas.addEventListener("mousedown", (e) => {
+  if (e.button === 0) triggerAttack();
+});
+
+function clearInput() {
+  Object.keys(keys).forEach(key => delete keys[key]);
+}
+
+function pauseInput() {
+  clearInput();
+  lastTimestamp = null;
+  accumulator = 0;
+}
+
+window.addEventListener("blur", pauseInput);
+document.addEventListener("visibilitychange", pauseInput);
+
+const victoryDialog = document.getElementById("victory-dialog");
+document.getElementById("restart-button").addEventListener("click", restartGame);
+victoryDialog.addEventListener("cancel", e => e.preventDefault());
+
+function completeAdventure() {
+  if (state.won) return;
+  state.gold -= state.tollCost;
+  state.won = true;
+  clearInput();
+  player.swinging = false;
+  player.swingTimer = 0;
+  updateHUD();
+  showStatus("Adventure complete! The boss is defeated and the final toll is paid.");
+  document.getElementById("victory-summary").textContent = `You escaped with ${state.gold} gold and ${state.totalAttackPower} attack power.`;
+  victoryDialog.showModal();
+}
+
+function restartGame() {
+  Object.assign(state, createInitialState());
+  Object.assign(player, createInitialPlayer());
+  enemies = [];
+  pauseInput();
+  victoryDialog.close();
+  updateHUD();
+  showStatus(WELCOME_MESSAGE);
+  canvas.focus();
+}
 
 // Town Objects
 const dummy = { x: 120, y: 180, width: 32, height: 48 };
@@ -81,7 +133,7 @@ function spawnZoneEnemies() {
 
 // Attack Execution
 function triggerAttack() {
-  if (player.swinging) return;
+  if (state.won || player.swinging) return;
   player.swinging = true;
   player.swingTimer = 12;
 
@@ -150,6 +202,7 @@ function buyChest(tier) {
 
 // Player Movement & Zone Transitions
 function updatePlayer() {
+  if (state.won) return;
   let dx = 0, dy = 0;
   if (keys["w"] || keys["arrowup"]) { dy -= 1; player.facing = "up"; }
   if (keys["s"] || keys["arrowdown"]) { dy += 1; player.facing = "down"; }
@@ -169,18 +222,15 @@ function updatePlayer() {
 
   // Transition Right (Next Zone)
   if (player.x > canvas.width - player.size) {
-    if (state.zone === 5) {
-      // Toll Fee requirement to move past Boss area
-      if (state.gold >= state.tollCost) {
-        state.gold -= state.tollCost;
-        state.tollCost = Math.floor(state.tollCost * 2.5);
-        state.zone++;
-        player.x = 30;
-        spawnZoneEnemies();
-        showStatus(`Paid 💰Toll! Moving to Zone ${state.zone}`);
+    if (state.zone === FINAL_ZONE) {
+      player.x = canvas.width - player.size - 10;
+      if (enemies.some(enemy => enemy.hp > 0)) {
+        showStatus("The final gate is locked. Defeat the boss first!");
+      } else if (state.gold >= state.tollCost) {
+        completeAdventure();
+        return;
       } else {
-        player.x = canvas.width - player.size - 10;
-        showStatus(`Toll Gate: You need 💰${state.tollCost} to advance!`);
+        showStatus(`Toll Gate: You need 💰${state.tollCost} to escape!`);
       }
     } else {
       state.zone++;
@@ -209,10 +259,10 @@ function updatePlayer() {
 
 // Enemy AI & Attacks
 function updateEnemies() {
-  if (state.zone === 0) return;
+  if (state.won || state.zone === 0) return;
 
-  enemies.forEach(enemy => {
-    if (enemy.hp <= 0) return;
+  for (const enemy of enemies) {
+    if (enemy.hp <= 0) continue;
 
     enemy.attackTimer++;
     if (enemy.attackTimer > 80) {
@@ -223,15 +273,18 @@ function updateEnemies() {
           state.hp = state.maxHp;
           state.gold = Math.floor(state.gold * 0.25); // Lose 75% gold
           state.zone = 0; // Respawn in Town
-          player.x = 100;
-          player.y = 200;
+          Object.assign(player, createInitialPlayer());
+          clearInput();
+          spawnZoneEnemies();
           showStatus("Died in battle! Lost 75% gold and returned to Town.");
+          updateHUD();
+          return;
         }
         updateHUD();
       }
       enemy.attackTimer = 0;
     }
-  });
+  }
 }
 
 // Drawing Functions
@@ -342,6 +395,16 @@ function render() {
     drawEnemies();
   }
 
+  if (state.zone === FINAL_ZONE) {
+    const bossAlive = enemies.some(enemy => enemy.hp > 0);
+    ctx.fillStyle = bossAlive ? "#ef4444" : "#eab308";
+    ctx.fillRect(canvas.width - 14, 30, 6, canvas.height - 60);
+    ctx.font = "bold 12px Courier New";
+    ctx.textAlign = "right";
+    ctx.fillText(bossAlive ? "GATE LOCKED" : `EXIT: ${state.tollCost} GOLD →`, canvas.width - 22, 22);
+    ctx.textAlign = "left";
+  }
+
   // Draw Entities & FX
   drawPixelPlayer();
   drawSwordSlash();
@@ -353,6 +416,13 @@ function updateHUD() {
   document.getElementById("gold-display").textContent = `💰 Gold: ${state.gold}`;
   document.getElementById("hp-text").textContent = `${state.hp}/${state.maxHp}`;
   document.getElementById("atk-text").textContent = state.totalAttackPower;
+  document.getElementById("objective-text").textContent = state.won
+    ? "Adventure complete. Well fought!"
+    : state.zone === FINAL_ZONE
+      ? enemies.some(enemy => enemy.hp > 0)
+        ? "Defeat the boss to unlock the final gate."
+        : `Boss defeated! Walk right and pay ${state.tollCost} gold to escape.`
+      : "Train, collect better swords, then defeat the boss in Area 5.";
   
   const hpPct = Math.max(0, (state.hp / state.maxHp) * 100);
   document.getElementById("player-hp-bar-fill").style.width = `${hpPct}%`;
@@ -362,13 +432,32 @@ function showStatus(msg) {
   document.getElementById("status-banner").textContent = msg;
 }
 
-function loop() {
-  updatePlayer();
-  updateEnemies();
+// Simulate at the original 60 Hz speed, regardless of display refresh rate.
+const STEP_MS = 1000 / 60;
+let lastTimestamp = null;
+let accumulator = 0;
+
+function loop(timestamp) {
+  if (lastTimestamp !== null && !document.hidden && !state.won) {
+    // Discard long pauses instead of applying a burst of movement or damage.
+    accumulator += Math.min(timestamp - lastTimestamp, 100);
+    while (accumulator + 1e-7 >= STEP_MS) {
+      updatePlayer();
+      if (keys[" "]) triggerAttack();
+      updateEnemies();
+      accumulator -= STEP_MS;
+      if (state.won) {
+        accumulator = 0;
+        break;
+      }
+    }
+  }
+  lastTimestamp = timestamp;
   render();
   requestAnimationFrame(loop);
 }
 
 // Start Game Engine
 updateHUD();
-loop();
+showStatus(WELCOME_MESSAGE);
+requestAnimationFrame(loop);

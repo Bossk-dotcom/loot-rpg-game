@@ -18,13 +18,24 @@
       <div>Atk Power: ⚔️<span id="atk-text">10</span></div>
     </header>
 
+    <p id="objective-text"></p>
     <div id="canvas-container">
-      <canvas id="gameCanvas" width="800" height="450"></canvas>
-      <div id="controls-tip"><b>WASD / Arrow Keys</b> to Move | <b>Spacebar or Left-Click</b> to Swing Sword</div>
+      <canvas id="gameCanvas" width="800" height="450" tabindex="0" aria-label="Game area. Move with WASD or arrow keys. Hold Space or left-click to swing your sword."></canvas>
+      <div id="controls-tip"><b>WASD / Arrow Keys</b> to Move | <b>Hold Space or Left-Click</b> to Swing Sword</div>
     </div>
 
-    <div id="status-banner">Welcome to Town! Walk right to battle or hit the dummy to train!</div>
+    <div id="status-banner" role="status">Welcome to Town! Walk right to battle or hit the dummy to train!</div>
   </div>
+
+  <dialog id="victory-dialog" aria-labelledby="victory-title" aria-describedby="victory-summary">
+    <div class="victory-icon" aria-hidden="true">⚔</div>
+    <p class="victory-label">ADVENTURE COMPLETE</p>
+    <h1 id="victory-title">You made it out!</h1>
+    <p>The boss has fallen. The toll is paid. Town will remember this one.</p>
+    <p id="victory-summary"></p>
+    <button id="restart-button" type="button" autofocus>Start a new adventure</button>
+    <p class="restart-note">Start fresh with your starter sword, 100 HP, and 0 gold.</p>
+  </dialog>
 
   <script src="script.js"></script>
 </body>
