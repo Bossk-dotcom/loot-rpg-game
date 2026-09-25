@@ -1,6 +1,101 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
+// Combat values are simulation ticks (60 ticks per second) and canvas pixels.
+const COMBAT = {
+  swordReach: 62, swordHalfAngle: Math.PI / 3, swingTicks: 20,
+  dodgeTicks: 12, dodgeCooldown: 72, dodgeSpeed: 13,
+  hurtGrace: 18, detection: 175, loseInterest: 250, leash: 230,
+  goblinSpeed: 2.1, maxPursuers: 3,
+  windup: 33, strikeTicks: 8, recovery: 40, enemyReach: 70,
+  enemyHalfAngle: Math.PI / 3
+};
+const facingVectors = { right: [1, 0], down: [0, 1], left: [-1, 0], up: [0, -1] };
+let effects = [];
+let soundEnabled = true;
+let audioContext = null;
+
+function unlockAudio() {
+  if (!soundEnabled) return;
+  const Audio = window.AudioContext || window.webkitAudioContext;
+  if (!Audio) return;
+  try {
+    if (!audioContext) audioContext = new Audio();
+    if (audioContext.state === "suspended") audioContext.resume().catch(() => {});
+  } catch (_) { /* Combat still works when audio is unavailable. */ }
+}
+
+function playSound(kind) {
+  if (!soundEnabled || !audioContext || audioContext.state !== "running") return;
+  const sounds = {
+    swing: [310, 100, 0.07, "triangle"], hit: [180, 65, 0.09, "square"],
+    hurt: [110, 45, 0.13, "sawtooth"], dodge: [450, 130, 0.12, "sine"],
+    defeat: [500, 850, 0.14, "triangle"]
+  };
+  const [start, end, duration, type] = sounds[kind];
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  const now = audioContext.currentTime;
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(start, now);
+  oscillator.frequency.exponentialRampToValueAtTime(end, now + duration);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.035, now + 0.006);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
+  oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+  oscillator.start(now);
+  oscillator.stop(now + duration);
+}
+
+function center(entity) {
+  return { x: entity.x + entity.size / 2, y: entity.y + entity.size / 2 };
+}
+
+function movementVector() {
+  const x = Number(!!(keys.d || keys.arrowright)) - Number(!!(keys.a || keys.arrowleft));
+  const y = Number(!!(keys.s || keys.arrowdown)) - Number(!!(keys.w || keys.arrowup));
+  const length = Math.hypot(x, y) || 1;
+  return [x / length, y / length];
+}
+
+// Circle vs. sector intersection, including the two radial edges and arc.
+// Rendering uses the same origin, reach and angle as collision detection.
+function inAttackArc(origin, angle, reach, halfAngle, target) {
+  const point = center(target);
+  const dx = point.x - origin.x, dy = point.y - origin.y;
+  const distance = Math.hypot(dx, dy), radius = target.size / 2;
+  if (distance <= radius) return true;
+  if (distance > reach + radius) return false;
+  const offset = Math.atan2(dy, dx) - angle;
+  const difference = Math.abs(Math.atan2(Math.sin(offset), Math.cos(offset)));
+  if (difference <= halfAngle) return true;
+  return [-halfAngle, halfAngle].some(edge => {
+    const vx = Math.cos(angle + edge), vy = Math.sin(angle + edge);
+    const projection = Math.max(0, Math.min(reach, dx * vx + dy * vy));
+    return Math.hypot(dx - vx * projection, dy - vy * projection) <= radius;
+  });
+}
+
+function addEffect(x, y, text, color, life = 36, vx = 0, vy = -0.65) {
+  effects.push({ x, y, text, color, life, vx, vy });
+  if (effects.length > 100) effects.shift();
+}
+
+function hitBurst(entity, color) {
+  const point = center(entity);
+  for (let i = 0; i < 6; i++) {
+    const angle = i * Math.PI / 3;
+    addEffect(point.x, point.y, "", color, 16, Math.cos(angle) * 2, Math.sin(angle) * 2);
+  }
+}
+
+function updateEffects() {
+  effects.forEach(effect => { effect.x += effect.vx; effect.y += effect.vy; effect.life--; });
+  effects = effects.filter(effect => effect.life > 0);
+}
+
 // --- Game State ---
 const FINAL_ZONE = 5;
 const WELCOME_MESSAGE = "Welcome to Town! Train on the dummy, buy swords, then defeat the boss and escape through the toll gate.";
@@ -24,7 +119,15 @@ const createInitialPlayer = () => ({
   speed: 6.5,
   facing: "right", // "up", "down", "left", "right"
   swinging: false,
-  swingTimer: 0
+  swingTimer: 0,
+  swingAngle: 0,
+  swingOrigin: null,
+  dodgeTimer: 0,
+  dodgeCooldown: 0,
+  dodgeX: 0,
+  dodgeY: 0,
+  invulnerableTimer: 0,
+  hitFlash: 0
 });
 const player = createInitialPlayer();
 
@@ -32,6 +135,8 @@ const player = createInitialPlayer();
 const keys = {};
 window.addEventListener("keydown", (e) => {
   if (state.won || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (["BUTTON", "INPUT", "TEXTAREA", "SELECT"].includes(e.target?.tagName)) return;
+  unlockAudio();
   if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(e.key.toLowerCase())) {
     e.preventDefault();
   }
@@ -39,10 +144,19 @@ window.addEventListener("keydown", (e) => {
   if (!e.repeat && (e.key === " " || e.code === "Space")) {
     triggerAttack();
   }
+  if (!e.repeat && e.key === "Shift") triggerDodge();
 });
 window.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
 canvas.addEventListener("mousedown", (e) => {
-  if (e.button === 0) triggerAttack();
+  if (e.button === 0) { unlockAudio(); triggerAttack(); }
+});
+
+document.getElementById("sound-button").addEventListener("click", () => {
+  soundEnabled = !soundEnabled;
+  if (soundEnabled) unlockAudio();
+  document.getElementById("sound-button").textContent = soundEnabled ? "Sound: On" : "Sound: Off";
+  document.getElementById("sound-button").setAttribute("aria-pressed", String(!soundEnabled));
+  canvas.focus();
 });
 
 function clearInput() {
@@ -69,6 +183,8 @@ function completeAdventure() {
   clearInput();
   player.swinging = false;
   player.swingTimer = 0;
+  player.dodgeTimer = 0;
+  effects = [];
   updateHUD();
   showStatus("Adventure complete! The boss is defeated and the final toll is paid.");
   document.getElementById("victory-summary").textContent = `You escaped with ${state.gold} gold and ${state.totalAttackPower} attack power.`;
@@ -79,6 +195,7 @@ function restartGame() {
   Object.assign(state, createInitialState());
   Object.assign(player, createInitialPlayer());
   enemies = [];
+  effects = [];
   pauseInput();
   victoryDialog.close();
   updateHUD();
@@ -101,6 +218,10 @@ let enemies = [];
 
 function spawnZoneEnemies() {
   enemies = [];
+  effects = [];
+  player.dodgeTimer = 0;
+  player.swinging = false;
+  player.swingTimer = 0;
   if (state.zone === 0) return;
 
   const configs = {
@@ -126,16 +247,29 @@ function spawnZoneEnemies() {
       type: cfg.type,
       color: cfg.color,
       goldValue: cfg.gold,
-      attackTimer: Math.floor(Math.random() * 60)
+      attackTimer: Math.floor(Math.random() * 60),
+      homeX: cfg.count === 1 ? 550 : startX + i * spacing,
+      homeY: 100 + (i % 3) * 90,
+      active: false,
+      returning: false,
+      phase: "idle",
+      phaseTimer: 0,
+      attackAngle: 0,
+      attackOrigin: null,
+      hitFlash: 0
     });
   }
 }
 
 // Attack Execution
 function triggerAttack() {
-  if (state.won || player.swinging) return;
+  if (state.won || player.swinging || player.dodgeTimer > 0) return;
   player.swinging = true;
-  player.swingTimer = 12;
+  player.swingTimer = state.zone === 0 ? 12 : COMBAT.swingTicks;
+  const [facingX, facingY] = facingVectors[player.facing];
+  player.swingAngle = Math.atan2(facingY, facingX);
+  player.swingOrigin = center(player);
+  playSound("swing");
 
   // Town: Hit Scarecrow Dummy
   if (state.zone === 0) {
@@ -167,14 +301,26 @@ function triggerAttack() {
   // Battle Zones: Attack Enemies
   enemies.forEach(enemy => {
     if (enemy.hp <= 0) return;
-    const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-    if (dist < 65) {
-      // Direct health subtraction
+    if (inAttackArc(player.swingOrigin, player.swingAngle, COMBAT.swordReach, COMBAT.swordHalfAngle, enemy)) {
       enemy.hp -= state.totalAttackPower;
+      enemy.hitFlash = 7;
+      const point = center(enemy);
+      addEffect(point.x, enemy.y - 52, `${state.totalAttackPower}`, "#fff2b2");
+      hitBurst(enemy, "#fde68a");
+      // Committed attacks cannot be stun-locked or moved away from their tell.
+      if (enemy.phase !== "windup" && enemy.phase !== "strike") {
+        const origin = center(player);
+        const distance = Math.hypot(point.x - origin.x, point.y - origin.y) || 1;
+        enemy.x = Math.max(20, Math.min(canvas.width - enemy.size - 20, enemy.x + (point.x - origin.x) / distance * 14));
+        enemy.y = Math.max(35, Math.min(canvas.height - enemy.size - 20, enemy.y + (point.y - origin.y) / distance * 14));
+      }
+      playSound("hit");
       if (enemy.hp <= 0) {
         enemy.hp = 0;
         state.gold += enemy.goldValue;
         showStatus(`Defeated ${enemy.type}! Earned 💰${enemy.goldValue}`);
+        addEffect(point.x, enemy.y - 10, `+${enemy.goldValue} gold`, "#facc15", 50);
+        playSound("defeat");
       }
       updateHUD();
     }
@@ -201,6 +347,19 @@ function buyChest(tier) {
 }
 
 // Player Movement & Zone Transitions
+function triggerDodge() {
+  if (state.won || player.dodgeCooldown > 0 || player.dodgeTimer > 0) return;
+  let [dx, dy] = movementVector();
+  if (dx === 0 && dy === 0) [dx, dy] = facingVectors[player.facing];
+  player.dodgeX = dx;
+  player.dodgeY = dy;
+  player.dodgeTimer = COMBAT.dodgeTicks;
+  player.dodgeCooldown = COMBAT.dodgeCooldown;
+  player.swinging = false;
+  player.swingTimer = 0;
+  playSound("dodge");
+}
+
 function updatePlayer() {
   if (state.won) return;
   let dx = 0, dy = 0;
@@ -214,8 +373,19 @@ function updatePlayer() {
     dy *= 0.7071;
   }
 
-  player.x += dx * player.speed;
-  player.y += dy * player.speed;
+  if (player.dodgeCooldown > 0) player.dodgeCooldown--;
+  if (player.invulnerableTimer > 0) player.invulnerableTimer--;
+  if (player.hitFlash > 0) player.hitFlash--;
+  if (player.dodgeTimer > 0) {
+    const point = center(player);
+    addEffect(point.x, point.y, "", "#67e8f9", 12, 0, 0);
+    player.x += player.dodgeX * COMBAT.dodgeSpeed;
+    player.y += player.dodgeY * COMBAT.dodgeSpeed;
+    player.dodgeTimer--;
+  } else {
+    player.x += dx * player.speed;
+    player.y += dy * player.speed;
+  }
 
   // Clamp within vertical bounds
   player.y = Math.max(20, Math.min(canvas.height - player.size - 20, player.y));
@@ -258,29 +428,132 @@ function updatePlayer() {
 }
 
 // Enemy AI & Attacks
+function moveEnemyTowards(enemy, x, y, separate = false) {
+  let dx = x - enemy.x, dy = y - enemy.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance < COMBAT.goblinSpeed) { enemy.x = x; enemy.y = y; return; }
+  dx /= distance; dy /= distance;
+  if (separate) {
+    for (const other of enemies) {
+      if (other === enemy || other.hp <= 0) continue;
+      const sx = enemy.x - other.x, sy = enemy.y - other.y;
+      const spacing = Math.hypot(sx, sy);
+      if (spacing > 0 && spacing < enemy.size + 8) {
+        dx += sx / spacing * 0.8;
+        dy += sy / spacing * 0.8;
+      }
+    }
+  }
+  const length = Math.hypot(dx, dy) || 1;
+  enemy.x = Math.max(20, Math.min(canvas.width - enemy.size - 20, enemy.x + dx / length * COMBAT.goblinSpeed));
+  enemy.y = Math.max(35, Math.min(canvas.height - enemy.size - 20, enemy.y + dy / length * COMBAT.goblinSpeed));
+}
+
+function damagePlayer(enemy) {
+  if (player.dodgeTimer > 0 || player.invulnerableTimer > 0) return false;
+  state.hp -= enemy.atk;
+  player.invulnerableTimer = COMBAT.hurtGrace;
+  player.hitFlash = 9;
+  const point = center(player), source = center(enemy);
+  addEffect(point.x, player.y - 8, `-${enemy.atk}`, "#fca5a5");
+  hitBurst(player, "#fb7185");
+  playSound("hurt");
+  if (state.hp <= 0) {
+    state.hp = state.maxHp;
+    state.gold = Math.floor(state.gold * 0.25);
+    state.zone = 0;
+    Object.assign(player, createInitialPlayer());
+    clearInput();
+    spawnZoneEnemies();
+    showStatus("Died in battle! Lost 75% gold and returned to Town.");
+    updateHUD();
+    return true;
+  }
+  const distance = Math.hypot(point.x - source.x, point.y - source.y) || 1;
+  player.x = Math.max(10, Math.min(canvas.width - player.size - 10, player.x + (point.x - source.x) / distance * 12));
+  player.y = Math.max(20, Math.min(canvas.height - player.size - 20, player.y + (point.y - source.y) / distance * 12));
+  updateHUD();
+  return false;
+}
+
+function updateGoblin(enemy) {
+  if (enemy.phase === "windup") {
+    enemy.phaseTimer--;
+    if (enemy.phaseTimer <= 0) {
+      enemy.phase = "strike";
+      enemy.phaseTimer = COMBAT.strikeTicks;
+      if (inAttackArc(enemy.attackOrigin, enemy.attackAngle, COMBAT.enemyReach, COMBAT.enemyHalfAngle, player)) {
+        if (player.dodgeTimer > 0) {
+          const point = center(player);
+          addEffect(point.x, player.y - 8, "DODGED", "#67e8f9");
+        }
+        return damagePlayer(enemy);
+      }
+    }
+    return false;
+  }
+  if (enemy.phase === "strike" || enemy.phase === "recovery") {
+    enemy.phaseTimer--;
+    if (enemy.phaseTimer <= 0) {
+      if (enemy.phase === "strike") {
+        enemy.phase = "recovery";
+        enemy.phaseTimer = COMBAT.recovery;
+      } else enemy.phase = "idle";
+    }
+    return false;
+  }
+
+  const point = center(enemy), target = center(player);
+  const distance = Math.hypot(target.x - point.x, target.y - point.y);
+  const fromHome = Math.hypot(enemy.x - enemy.homeX, enemy.y - enemy.homeY);
+  if (enemy.active && (distance > COMBAT.loseInterest || fromHome > COMBAT.leash)) {
+    enemy.active = false;
+    enemy.returning = true;
+  }
+  if (enemy.returning) {
+    moveEnemyTowards(enemy, enemy.homeX, enemy.homeY);
+    if (Math.hypot(enemy.x - enemy.homeX, enemy.y - enemy.homeY) < 3) enemy.returning = false;
+    return false;
+  }
+  if (!enemy.active) return false;
+  if (distance <= COMBAT.enemyReach - 8) {
+    enemy.phase = "windup";
+    enemy.phaseTimer = COMBAT.windup;
+    enemy.attackOrigin = point;
+    enemy.attackAngle = Math.atan2(target.y - point.y, target.x - point.x);
+  } else {
+    moveEnemyTowards(enemy, target.x - enemy.size / 2, target.y - enemy.size / 2, true);
+  }
+  return false;
+}
+
 function updateEnemies() {
   if (state.won || state.zone === 0) return;
 
+  const target = center(player);
+  const goblins = enemies.filter(enemy => enemy.type === "Goblin" && enemy.hp > 0);
+  let slots = COMBAT.maxPursuers - goblins.filter(enemy => enemy.active).length;
+  goblins.filter(enemy => !enemy.active && !enemy.returning)
+    .map(enemy => ({ enemy, distance: Math.hypot(center(enemy).x - target.x, center(enemy).y - target.y) }))
+    .sort((a, b) => a.distance - b.distance)
+    .forEach(({ enemy, distance }) => {
+      if (slots > 0 && distance <= COMBAT.detection) { enemy.active = true; slots--; }
+    });
+
   for (const enemy of enemies) {
     if (enemy.hp <= 0) continue;
+    if (enemy.hitFlash > 0) enemy.hitFlash--;
+    if (enemy.type === "Goblin") {
+      if (updateGoblin(enemy)) return;
+      continue;
+    }
 
+    // Later enemies retain their original behavior for this focused update.
     enemy.attackTimer++;
     if (enemy.attackTimer > 80) {
       const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
       if (dist < 45) {
-        state.hp -= enemy.atk;
-        if (state.hp <= 0) {
-          state.hp = state.maxHp;
-          state.gold = Math.floor(state.gold * 0.25); // Lose 75% gold
-          state.zone = 0; // Respawn in Town
-          Object.assign(player, createInitialPlayer());
-          clearInput();
-          spawnZoneEnemies();
-          showStatus("Died in battle! Lost 75% gold and returned to Town.");
-          updateHUD();
-          return;
-        }
-        updateHUD();
+        if (damagePlayer(enemy)) return;
       }
       enemy.attackTimer = 0;
     }
@@ -311,23 +584,51 @@ function drawPixelPlayer() {
   // Pants
   ctx.fillStyle = "#475569";
   ctx.fillRect(player.x + 6, player.y + 24, 16, 6);
+
+  if (player.hitFlash > 0) {
+    ctx.fillStyle = "#ffffffaa";
+    ctx.fillRect(player.x + 2, player.y, 24, 30);
+  }
+  if (player.dodgeTimer > 0 || player.invulnerableTimer > 0) {
+    const point = center(player);
+    ctx.strokeStyle = player.dodgeTimer > 0 ? "#67e8f9" : "#fda4af";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 21, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawAttackArc(origin, angle, reach, halfAngle, color, opacity) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(origin.x, origin.y);
+  ctx.arc(origin.x, origin.y, reach, angle - halfAngle, angle + halfAngle);
+  ctx.closePath();
+  ctx.globalAlpha = opacity;
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.globalAlpha = 0.9;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawSwordSlash() {
-  if (!player.swinging) return;
-
-  ctx.strokeStyle = "#38bdf8";
-  ctx.lineWidth = 4;
+  if (!player.swinging || !player.swingOrigin) return;
+  const duration = state.zone === 0 ? 12 : COMBAT.swingTicks;
+  const elapsed = duration - player.swingTimer;
+  // Keep the impact arc brief so it does not linger behind a moving player.
+  if (elapsed >= 7) return;
+  const origin = player.swingOrigin;
+  drawAttackArc(origin, player.swingAngle, COMBAT.swordReach, COMBAT.swordHalfAngle, "#7dd3fc", 0.12);
+  const sweep = player.swingAngle - COMBAT.swordHalfAngle + elapsed / 7 * COMBAT.swordHalfAngle * 2;
+  ctx.strokeStyle = "#e0f2fe";
+  ctx.lineWidth = 3;
   ctx.beginPath();
-
-  const px = player.x + player.size / 2;
-  const py = player.y + player.size / 2;
-
-  if (player.facing === "right") ctx.arc(px + 15, py, 25, -Math.PI / 3, Math.PI / 3);
-  else if (player.facing === "left") ctx.arc(px - 15, py, 25, (2 * Math.PI) / 3, (4 * Math.PI) / 3);
-  else if (player.facing === "up") ctx.arc(px, py - 15, 25, -Math.PI, 0);
-  else if (player.facing === "down") ctx.arc(px, py + 15, 25, 0, Math.PI);
-
+  ctx.moveTo(origin.x + Math.cos(sweep) * 22, origin.y + Math.sin(sweep) * 22);
+  ctx.lineTo(origin.x + Math.cos(sweep) * COMBAT.swordReach, origin.y + Math.sin(sweep) * COMBAT.swordReach);
   ctx.stroke();
 }
 
@@ -360,8 +661,21 @@ function drawEnemies() {
     if (enemy.hp <= 0) return;
 
     // Pixelated Body
-    ctx.fillStyle = enemy.color;
+    ctx.fillStyle = enemy.hitFlash > 0 ? "#ffffff" : enemy.color;
     ctx.fillRect(enemy.x, enemy.y, enemy.size, enemy.size);
+    if (enemy.type === "Goblin") {
+      ctx.fillRect(enemy.x - 4, enemy.y + 3, 4, 7);
+      ctx.fillRect(enemy.x + enemy.size, enemy.y + 3, 4, 7);
+      ctx.fillStyle = enemy.phase === "windup" ? "#fef3c7" : "#052e16";
+      ctx.fillRect(enemy.x + 5, enemy.y + 7, 4, 4);
+      ctx.fillRect(enemy.x + 15, enemy.y + 7, 4, 4);
+      ctx.fillRect(enemy.x + 8, enemy.y + 17, 8, 3);
+      if (enemy.phase === "windup") {
+        ctx.fillStyle = "#fbbf24";
+        ctx.font = "bold 18px Courier New";
+        ctx.fillText("!", enemy.x + enemy.size / 2 - 5, enemy.y - 38);
+      }
+    }
 
     // Enemy Health Bar
     const barW = enemy.size + 10;
@@ -385,6 +699,40 @@ function drawEnemies() {
   });
 }
 
+function drawEnemyAttacks() {
+  enemies.forEach(enemy => {
+    if (enemy.hp <= 0 || !enemy.attackOrigin) return;
+    if (enemy.phase === "windup") {
+      const progress = 1 - enemy.phaseTimer / COMBAT.windup;
+      drawAttackArc(enemy.attackOrigin, enemy.attackAngle, COMBAT.enemyReach, COMBAT.enemyHalfAngle, "#fbbf24", 0.08 + progress * 0.22);
+      ctx.strokeStyle = "#fff2b2";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(enemy.attackOrigin.x, enemy.attackOrigin.y, 19, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+      ctx.stroke();
+    } else if (enemy.phase === "strike") {
+      drawAttackArc(enemy.attackOrigin, enemy.attackAngle, COMBAT.enemyReach, COMBAT.enemyHalfAngle, "#fb7185", 0.35);
+    }
+  });
+}
+
+function drawEffects() {
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.font = "bold 13px Courier New";
+  effects.forEach(effect => {
+    ctx.globalAlpha = Math.min(1, effect.life / 12);
+    ctx.fillStyle = effect.color;
+    if (effect.text) {
+      ctx.strokeStyle = "#101018";
+      ctx.lineWidth = 3;
+      ctx.strokeText(effect.text, effect.x, effect.y);
+      ctx.fillText(effect.text, effect.x, effect.y);
+    } else ctx.fillRect(effect.x - 2, effect.y - 2, 4, 4);
+  });
+  ctx.restore();
+}
+
 function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -392,6 +740,12 @@ function render() {
   if (state.zone === 0) {
     drawTown();
   } else {
+    if (state.zone === 1) {
+      ctx.fillStyle = "#89b69a";
+      ctx.font = "bold 12px Courier New";
+      ctx.fillText(`GOBLIN GROVE  ·  ${enemies.filter(enemy => enemy.hp > 0).length} remaining`, 18, 25);
+    }
+    drawEnemyAttacks();
     drawEnemies();
   }
 
@@ -408,6 +762,15 @@ function render() {
   // Draw Entities & FX
   drawPixelPlayer();
   drawSwordSlash();
+  drawEffects();
+  updateCombatHUD();
+}
+
+function updateCombatHUD() {
+  const status = player.dodgeTimer > 0 ? "Dodging" : player.dodgeCooldown > 0 ? `${(player.dodgeCooldown / 60).toFixed(1)}s` : "Ready";
+  const text = document.getElementById("dodge-text");
+  if (text.textContent !== status) text.textContent = status;
+  document.getElementById("dodge-fill").style.width = `${100 * (1 - player.dodgeCooldown / COMBAT.dodgeCooldown)}%`;
 }
 
 function updateHUD() {
@@ -422,7 +785,9 @@ function updateHUD() {
       ? enemies.some(enemy => enemy.hp > 0)
         ? "Defeat the boss to unlock the final gate."
         : `Boss defeated! Walk right and pay ${state.tollCost} gold to escape.`
-      : "Train, collect better swords, then defeat the boss in Area 5.";
+      : state.zone === 1
+        ? "Watch the amber attack cone. Step aside or Shift-dodge, then strike back."
+        : "Train, collect better swords, then defeat the boss in Area 5.";
   
   const hpPct = Math.max(0, (state.hp / state.maxHp) * 100);
   document.getElementById("player-hp-bar-fill").style.width = `${hpPct}%`;
@@ -445,6 +810,7 @@ function loop(timestamp) {
       updatePlayer();
       if (keys[" "]) triggerAttack();
       updateEnemies();
+      updateEffects();
       accumulator -= STEP_MS;
       if (state.won) {
         accumulator = 0;
