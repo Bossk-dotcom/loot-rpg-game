@@ -19,9 +19,15 @@
     </header>
 
     <p id="objective-text"></p>
+    <div id="combat-toolbar">
+      <div id="dodge-status"><kbd>Shift</kbd> Dodge <span id="dodge-text">Ready</span>
+        <div id="dodge-track" aria-hidden="true"><div id="dodge-fill"></div></div>
+      </div>
+      <button id="sound-button" type="button" aria-pressed="false" aria-label="Mute combat sounds">Sound: On</button>
+    </div>
     <div id="canvas-container">
-      <canvas id="gameCanvas" width="800" height="450" tabindex="0" aria-label="Game area. Move with WASD or arrow keys. Hold Space or left-click to swing your sword."></canvas>
-      <div id="controls-tip"><b>WASD / Arrow Keys</b> to Move | <b>Hold Space or Left-Click</b> to Swing Sword</div>
+      <canvas id="gameCanvas" width="800" height="450" tabindex="0" aria-label="Game area. Move with WASD or arrow keys. Hold Space or left-click to swing. Press Shift to dodge."></canvas>
+      <div id="controls-tip"><b>WASD / Arrows</b> Move · <b>Hold Space / Left-Click</b> Swing · <b>Shift</b> Dodge</div>
     </div>
 
     <div id="status-banner" role="status">Welcome to Town! Walk right to battle or hit the dummy to train!</div>
