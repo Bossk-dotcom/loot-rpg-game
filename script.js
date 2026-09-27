@@ -5,11 +5,20 @@ const ctx = canvas.getContext("2d");
 const COMBAT = {
   swordReach: 62, swordHalfAngle: Math.PI / 3, swingTicks: 20,
   dodgeTicks: 12, dodgeCooldown: 72, dodgeSpeed: 13,
-  hurtGrace: 18, detection: 175, loseInterest: 250, leash: 230,
-  goblinSpeed: 2.1, maxPursuers: 3,
-  windup: 33, strikeTicks: 8, recovery: 40, enemyReach: 70,
-  enemyHalfAngle: Math.PI / 3
+  hurtGrace: 18, detection: 220, loseInterest: 300, leash: 280,
+  maxPursuers: 4, enemyHalfAngle: Math.PI / 3,
+  respawnTime: 300 // 5 seconds at 60fps
 };
+
+// Unique combat stats per enemy type
+const ENEMY_SPECS = {
+  Goblin:      { speed: 2.1, windup: 30, strikeTicks: 8, recovery: 35, reach: 65, color: "#22c55e", size: 24, hp: 40,   atk: 5,   gold: 15 },
+  Orc:         { speed: 1.6, windup: 45, strikeTicks: 10, recovery: 45, reach: 80, color: "#15803d", size: 30, hp: 120,  atk: 12,  gold: 35 },
+  Knight:      { speed: 1.3, windup: 50, strikeTicks: 12, recovery: 50, reach: 90, color: "#94a3b8", size: 32, hp: 350,  atk: 25,  gold: 80 },
+  "Dark Knight": { speed: 1.1, windup: 60, strikeTicks: 14, recovery: 60, reach: 105, color: "#334155", size: 36, hp: 900,  atk: 50,  gold: 200 },
+  BOSS:        { speed: 0.9, windup: 70, strikeTicks: 16, recovery: 70, reach: 130, color: "#b91c1c", size: 52, hp: 3500, atk: 90,  gold: 1000 }
+};
+
 const facingVectors = { right: [1, 0], down: [0, 1], left: [-1, 0], up: [0, -1] };
 let effects = [];
 let soundEnabled = true;
@@ -60,8 +69,6 @@ function movementVector() {
   return [x / length, y / length];
 }
 
-// Circle vs. sector intersection, including the two radial edges and arc.
-// Rendering uses the same origin, reach and angle as collision detection.
 function inAttackArc(origin, angle, reach, halfAngle, target) {
   const point = center(target);
   const dx = point.x - origin.x, dy = point.y - origin.y;
@@ -100,7 +107,7 @@ function updateEffects() {
 const FINAL_ZONE = 5;
 const WELCOME_MESSAGE = "Welcome to Town! Train on the dummy, buy swords, then defeat the boss and escape through the toll gate.";
 const createInitialState = () => ({
-  zone: 0, // 0: Town, 1: Goblins, 2: Orcs, 3: Knights, 4: Dark Knights, 5: Boss
+  zone: 0,
   gold: 0,
   hp: 100,
   maxHp: 100,
@@ -117,7 +124,7 @@ const createInitialPlayer = () => ({
   y: 200,
   size: 28,
   speed: 6.5,
-  facing: "right", // "up", "down", "left", "right"
+  facing: "right",
   swinging: false,
   swingTimer: 0,
   swingAngle: 0,
@@ -213,7 +220,6 @@ const chestShops = [
   { tier: "BROKEN", cost: 5000, x: 480, y: 320, color: "#ef4444" }
 ];
 
-// Enemy Data Setup
 let enemies = [];
 
 function spawnZoneEnemies() {
@@ -224,39 +230,39 @@ function spawnZoneEnemies() {
   player.swingTimer = 0;
   if (state.zone === 0) return;
 
-  const configs = {
-    1: { count: 15, hp: 40, atk: 5, type: "Goblin", color: "#22c55e", size: 24, gold: 15 },
-    2: { count: 10, hp: 120, atk: 12, type: "Orc", color: "#15803d", size: 30, gold: 35 },
-    3: { count: 5, hp: 350, atk: 25, type: "Knight", color: "#94a3b8", size: 32, gold: 80 },
-    4: { count: 3, hp: 900, atk: 50, type: "Dark Knight", color: "#334155", size: 36, gold: 200 },
-    5: { count: 1, hp: 3500, atk: 90, type: "BOSS", color: "#b91c1c", size: 52, gold: 1000 }
-  };
+  const zoneTypes = { 1: "Goblin", 2: "Orc", 3: "Knight", 4: "Dark Knight", 5: "BOSS" };
+  const zoneCounts = { 1: 15, 2: 10, 3: 5, 4: 3, 5: 1 };
 
-  const cfg = configs[state.zone];
+  const type = zoneTypes[state.zone];
+  const count = zoneCounts[state.zone];
+  const spec = ENEMY_SPECS[type];
+
   const startX = 250;
-  const spacing = (canvas.width - startX - 80) / Math.max(1, cfg.count - 1);
+  const spacing = (canvas.width - startX - 80) / Math.max(1, count - 1);
 
-  for (let i = 0; i < cfg.count; i++) {
+  for (let i = 0; i < count; i++) {
+    const homeX = count === 1 ? 550 : startX + i * spacing;
+    const homeY = 100 + (i % 3) * 90;
     enemies.push({
-      x: cfg.count === 1 ? 550 : startX + i * spacing,
-      y: 100 + (i % 3) * 90,
-      size: cfg.size,
-      hp: cfg.hp,
-      maxHp: cfg.hp,
-      atk: cfg.atk,
-      type: cfg.type,
-      color: cfg.color,
-      goldValue: cfg.gold,
-      attackTimer: Math.floor(Math.random() * 60),
-      homeX: cfg.count === 1 ? 550 : startX + i * spacing,
-      homeY: 100 + (i % 3) * 90,
+      x: homeX,
+      y: homeY,
+      size: spec.size,
+      hp: spec.hp,
+      maxHp: spec.hp,
+      atk: spec.atk,
+      type: type,
+      color: spec.color,
+      goldValue: spec.gold,
+      homeX: homeX,
+      homeY: homeY,
       active: false,
       returning: false,
       phase: "idle",
       phaseTimer: 0,
       attackAngle: 0,
       attackOrigin: null,
-      hitFlash: 0
+      hitFlash: 0,
+      respawnTimer: 0
     });
   }
 }
@@ -271,11 +277,9 @@ function triggerAttack() {
   player.swingOrigin = center(player);
   playSound("swing");
 
-  // Town: Hit Scarecrow Dummy
   if (state.zone === 0) {
     const distToDummy = Math.hypot(player.x - dummy.x, player.y - dummy.y);
     if (distToDummy < 60) {
-      // Adds the sword's fixed power directly to total attack power pool
       const swordPower = state.equippedSword.power;
       state.totalAttackPower += swordPower;
       showStatus(`Trained on dummy! +${swordPower} Attack Power added (Total: ${state.totalAttackPower})`);
@@ -283,7 +287,6 @@ function triggerAttack() {
       return;
     }
 
-    // Town: Buy Chests
     chestShops.forEach(shop => {
       const dist = Math.hypot(player.x - shop.x, player.y - shop.y);
       if (dist < 50) {
@@ -298,7 +301,6 @@ function triggerAttack() {
     return;
   }
 
-  // Battle Zones: Attack Enemies
   enemies.forEach(enemy => {
     if (enemy.hp <= 0) return;
     if (inAttackArc(player.swingOrigin, player.swingAngle, COMBAT.swordReach, COMBAT.swordHalfAngle, enemy)) {
@@ -307,7 +309,7 @@ function triggerAttack() {
       const point = center(enemy);
       addEffect(point.x, enemy.y - 52, `${state.totalAttackPower}`, "#fff2b2");
       hitBurst(enemy, "#fde68a");
-      // Committed attacks cannot be stun-locked or moved away from their tell.
+
       if (enemy.phase !== "windup" && enemy.phase !== "strike") {
         const origin = center(player);
         const distance = Math.hypot(point.x - origin.x, point.y - origin.y) || 1;
@@ -321,13 +323,15 @@ function triggerAttack() {
         showStatus(`Defeated ${enemy.type}! Earned 💰${enemy.goldValue}`);
         addEffect(point.x, enemy.y - 10, `+${enemy.goldValue} gold`, "#facc15", 50);
         playSound("defeat");
+        if (state.zone !== FINAL_ZONE) {
+          enemy.respawnTimer = COMBAT.respawnTime;
+        }
       }
       updateHUD();
     }
   });
 }
 
-// Chest Loot System
 function buyChest(tier) {
   const roll = Math.random() * 100;
   let rarity = "Common";
@@ -346,7 +350,6 @@ function buyChest(tier) {
   updateHUD();
 }
 
-// Player Movement & Zone Transitions
 function triggerDodge() {
   if (state.won || player.dodgeCooldown > 0 || player.dodgeTimer > 0) return;
   let [dx, dy] = movementVector();
@@ -387,10 +390,8 @@ function updatePlayer() {
     player.y += dy * player.speed;
   }
 
-  // Clamp within vertical bounds
   player.y = Math.max(20, Math.min(canvas.height - player.size - 20, player.y));
 
-  // Transition Right (Next Zone)
   if (player.x > canvas.width - player.size) {
     if (state.zone === FINAL_ZONE) {
       player.x = canvas.width - player.size - 10;
@@ -410,7 +411,6 @@ function updatePlayer() {
     updateHUD();
   }
 
-  // Transition Left (Previous Zone)
   if (player.x < 10 && state.zone > 0) {
     state.zone--;
     player.x = canvas.width - player.size - 30;
@@ -420,18 +420,17 @@ function updatePlayer() {
     player.x = 10;
   }
 
-  // Handle Swing Timer
   if (player.swinging) {
     player.swingTimer--;
     if (player.swingTimer <= 0) player.swinging = false;
   }
 }
 
-// Enemy AI & Attacks
 function moveEnemyTowards(enemy, x, y, separate = false) {
+  const spec = ENEMY_SPECS[enemy.type];
   let dx = x - enemy.x, dy = y - enemy.y;
   const distance = Math.hypot(dx, dy);
-  if (distance < COMBAT.goblinSpeed) { enemy.x = x; enemy.y = y; return; }
+  if (distance < spec.speed) { enemy.x = x; enemy.y = y; return; }
   dx /= distance; dy /= distance;
   if (separate) {
     for (const other of enemies) {
@@ -445,8 +444,8 @@ function moveEnemyTowards(enemy, x, y, separate = false) {
     }
   }
   const length = Math.hypot(dx, dy) || 1;
-  enemy.x = Math.max(20, Math.min(canvas.width - enemy.size - 20, enemy.x + dx / length * COMBAT.goblinSpeed));
-  enemy.y = Math.max(35, Math.min(canvas.height - enemy.size - 20, enemy.y + dy / length * COMBAT.goblinSpeed));
+  enemy.x = Math.max(20, Math.min(canvas.width - enemy.size - 20, enemy.x + dx / length * spec.speed));
+  enemy.y = Math.max(35, Math.min(canvas.height - enemy.size - 20, enemy.y + dy / length * spec.speed));
 }
 
 function damagePlayer(enemy) {
@@ -476,29 +475,35 @@ function damagePlayer(enemy) {
   return false;
 }
 
-function updateGoblin(enemy) {
+function updateEnemyAI(enemy) {
+  const spec = ENEMY_SPECS[enemy.type];
+
   if (enemy.phase === "windup") {
     enemy.phaseTimer--;
     if (enemy.phaseTimer <= 0) {
       enemy.phase = "strike";
-      enemy.phaseTimer = COMBAT.strikeTicks;
-      if (inAttackArc(enemy.attackOrigin, enemy.attackAngle, COMBAT.enemyReach, COMBAT.enemyHalfAngle, player)) {
+      enemy.phaseTimer = spec.strikeTicks;
+      if (inAttackArc(enemy.attackOrigin, enemy.attackAngle, spec.reach, COMBAT.enemyHalfAngle, player)) {
         if (player.dodgeTimer > 0) {
           const point = center(player);
           addEffect(point.x, player.y - 8, "DODGED", "#67e8f9");
+        } else {
+          return damagePlayer(enemy);
         }
-        return damagePlayer(enemy);
       }
     }
     return false;
   }
+
   if (enemy.phase === "strike" || enemy.phase === "recovery") {
     enemy.phaseTimer--;
     if (enemy.phaseTimer <= 0) {
       if (enemy.phase === "strike") {
         enemy.phase = "recovery";
-        enemy.phaseTimer = COMBAT.recovery;
-      } else enemy.phase = "idle";
+        enemy.phaseTimer = spec.recovery;
+      } else {
+        enemy.phase = "idle";
+      }
     }
     return false;
   }
@@ -506,6 +511,7 @@ function updateGoblin(enemy) {
   const point = center(enemy), target = center(player);
   const distance = Math.hypot(target.x - point.x, target.y - point.y);
   const fromHome = Math.hypot(enemy.x - enemy.homeX, enemy.y - enemy.homeY);
+
   if (enemy.active && (distance > COMBAT.loseInterest || fromHome > COMBAT.leash)) {
     enemy.active = false;
     enemy.returning = true;
@@ -515,10 +521,12 @@ function updateGoblin(enemy) {
     if (Math.hypot(enemy.x - enemy.homeX, enemy.y - enemy.homeY) < 3) enemy.returning = false;
     return false;
   }
+
   if (!enemy.active) return false;
-  if (distance <= COMBAT.enemyReach - 8) {
+
+  if (distance <= spec.reach - 8) {
     enemy.phase = "windup";
-    enemy.phaseTimer = COMBAT.windup;
+    enemy.phaseTimer = spec.windup;
     enemy.attackOrigin = point;
     enemy.attackAngle = Math.atan2(target.y - point.y, target.x - point.x);
   } else {
@@ -531,57 +539,57 @@ function updateEnemies() {
   if (state.won || state.zone === 0) return;
 
   const target = center(player);
-  const goblins = enemies.filter(enemy => enemy.type === "Goblin" && enemy.hp > 0);
-  let slots = COMBAT.maxPursuers - goblins.filter(enemy => enemy.active).length;
-  goblins.filter(enemy => !enemy.active && !enemy.returning)
-    .map(enemy => ({ enemy, distance: Math.hypot(center(enemy).x - target.x, center(enemy).y - target.y) }))
+  const aliveEnemies = enemies.filter(e => e.hp > 0);
+  let slots = COMBAT.maxPursuers - aliveEnemies.filter(e => e.active).length;
+
+  aliveEnemies.filter(e => !e.active && !e.returning)
+    .map(e => ({ enemy: e, distance: Math.hypot(center(e).x - target.x, center(e).y - target.y) }))
     .sort((a, b) => a.distance - b.distance)
     .forEach(({ enemy, distance }) => {
       if (slots > 0 && distance <= COMBAT.detection) { enemy.active = true; slots--; }
     });
 
   for (const enemy of enemies) {
-    if (enemy.hp <= 0) continue;
-    if (enemy.hitFlash > 0) enemy.hitFlash--;
-    if (enemy.type === "Goblin") {
-      if (updateGoblin(enemy)) return;
+    if (enemy.hp <= 0) {
+      if (enemy.respawnTimer > 0) {
+        enemy.respawnTimer--;
+        if (enemy.respawnTimer <= 0) {
+          const spec = ENEMY_SPECS[enemy.type];
+          enemy.hp = spec.hp;
+          enemy.x = enemy.homeX;
+          enemy.y = enemy.homeY;
+          enemy.phase = "idle";
+          enemy.active = false;
+          enemy.returning = false;
+          addEffect(center(enemy).x, center(enemy).y, "RESPAWNED", "#a7f3d0", 40);
+        }
+      }
       continue;
     }
 
-    // Later enemies retain their original behavior for this focused update.
-    enemy.attackTimer++;
-    if (enemy.attackTimer > 80) {
-      const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-      if (dist < 45) {
-        if (damagePlayer(enemy)) return;
-      }
-      enemy.attackTimer = 0;
-    }
+    if (enemy.hitFlash > 0) enemy.hitFlash--;
+    if (updateEnemyAI(enemy)) return;
   }
 }
 
 // Drawing Functions
 function drawPixelPlayer() {
-  // Cap/Hat (Red)
   ctx.fillStyle = "#ef4444";
   ctx.fillRect(player.x + 4, player.y, 20, 8);
-  ctx.fillStyle = "#06b6d4"; // Visor
+  ctx.fillStyle = "#06b6d4";
   ctx.fillRect(player.x + (player.facing === "left" ? 0 : 16), player.y + 4, 8, 4);
 
-  // Face
   ctx.fillStyle = "#fde047";
   ctx.fillRect(player.x + 4, player.y + 8, 20, 10);
-  ctx.fillStyle = "#000000"; // Eyes
+  ctx.fillStyle = "#000000";
   const eyeX = player.facing === "left" ? player.x + 6 : player.x + 18;
   ctx.fillRect(eyeX, player.y + 10, 4, 4);
 
-  // Body (Red shirt, blue sleeves)
   ctx.fillStyle = "#3b82f6";
   ctx.fillRect(player.x + 2, player.y + 18, 24, 6);
   ctx.fillStyle = "#ef4444";
   ctx.fillRect(player.x + 6, player.y + 18, 16, 6);
 
-  // Pants
   ctx.fillStyle = "#475569";
   ctx.fillRect(player.x + 6, player.y + 24, 16, 6);
 
@@ -619,7 +627,6 @@ function drawSwordSlash() {
   if (!player.swinging || !player.swingOrigin) return;
   const duration = state.zone === 0 ? 12 : COMBAT.swingTicks;
   const elapsed = duration - player.swingTimer;
-  // Keep the impact arc brief so it does not linger behind a moving player.
   if (elapsed >= 7) return;
   const origin = player.swingOrigin;
   drawAttackArc(origin, player.swingAngle, COMBAT.swordReach, COMBAT.swordHalfAngle, "#7dd3fc", 0.12);
@@ -633,7 +640,6 @@ function drawSwordSlash() {
 }
 
 function drawTown() {
-  // Draw Training Dummy
   ctx.fillStyle = "#d97706";
   ctx.fillRect(dummy.x, dummy.y, dummy.width, dummy.height);
   ctx.fillStyle = "#78350f";
@@ -642,7 +648,6 @@ function drawTown() {
   ctx.font = "12px Courier New";
   ctx.fillText("DUMMY", dummy.x - 2, dummy.y - 8);
 
-  // Draw Chest Shops
   chestShops.forEach(shop => {
     ctx.fillStyle = shop.color;
     ctx.fillRect(shop.x, shop.y, 36, 28);
@@ -660,24 +665,22 @@ function drawEnemies() {
   enemies.forEach(enemy => {
     if (enemy.hp <= 0) return;
 
-    // Pixelated Body
     ctx.fillStyle = enemy.hitFlash > 0 ? "#ffffff" : enemy.color;
     ctx.fillRect(enemy.x, enemy.y, enemy.size, enemy.size);
-    if (enemy.type === "Goblin") {
-      ctx.fillRect(enemy.x - 4, enemy.y + 3, 4, 7);
-      ctx.fillRect(enemy.x + enemy.size, enemy.y + 3, 4, 7);
-      ctx.fillStyle = enemy.phase === "windup" ? "#fef3c7" : "#052e16";
-      ctx.fillRect(enemy.x + 5, enemy.y + 7, 4, 4);
-      ctx.fillRect(enemy.x + 15, enemy.y + 7, 4, 4);
-      ctx.fillRect(enemy.x + 8, enemy.y + 17, 8, 3);
-      if (enemy.phase === "windup") {
-        ctx.fillStyle = "#fbbf24";
-        ctx.font = "bold 18px Courier New";
-        ctx.fillText("!", enemy.x + enemy.size / 2 - 5, enemy.y - 38);
-      }
+
+    ctx.fillRect(enemy.x - 4, enemy.y + 3, 4, 7);
+    ctx.fillRect(enemy.x + enemy.size, enemy.y + 3, 4, 7);
+    ctx.fillStyle = enemy.phase === "windup" ? "#fef3c7" : "#052e16";
+    ctx.fillRect(enemy.x + 5, enemy.y + 7, 4, 4);
+    ctx.fillRect(enemy.x + Math.max(5, enemy.size - 9), enemy.y + 7, 4, 4);
+    ctx.fillRect(enemy.x + 8, enemy.y + Math.max(12, enemy.size - 10), Math.max(4, enemy.size - 16), 3);
+
+    if (enemy.phase === "windup") {
+      ctx.fillStyle = "#fbbf24";
+      ctx.font = "bold 18px Courier New";
+      ctx.fillText("!", enemy.x + enemy.size / 2 - 5, enemy.y - 38);
     }
 
-    // Enemy Health Bar
     const barW = enemy.size + 10;
     const barH = 6;
     const barX = enemy.x - 5;
@@ -690,7 +693,6 @@ function drawEnemies() {
     ctx.fillStyle = "#22c55e";
     ctx.fillRect(barX, barY, barW * (enemy.hp / enemy.maxHp), barH);
 
-    // Enemy HP Numbers above head
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 11px Courier New";
     ctx.textAlign = "center";
@@ -702,16 +704,18 @@ function drawEnemies() {
 function drawEnemyAttacks() {
   enemies.forEach(enemy => {
     if (enemy.hp <= 0 || !enemy.attackOrigin) return;
+    const spec = ENEMY_SPECS[enemy.type];
+
     if (enemy.phase === "windup") {
-      const progress = 1 - enemy.phaseTimer / COMBAT.windup;
-      drawAttackArc(enemy.attackOrigin, enemy.attackAngle, COMBAT.enemyReach, COMBAT.enemyHalfAngle, "#fbbf24", 0.08 + progress * 0.22);
+      const progress = 1 - enemy.phaseTimer / spec.windup;
+      drawAttackArc(enemy.attackOrigin, enemy.attackAngle, spec.reach, COMBAT.enemyHalfAngle, "#fbbf24", 0.08 + progress * 0.22);
       ctx.strokeStyle = "#fff2b2";
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(enemy.attackOrigin.x, enemy.attackOrigin.y, 19, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
       ctx.stroke();
     } else if (enemy.phase === "strike") {
-      drawAttackArc(enemy.attackOrigin, enemy.attackAngle, COMBAT.enemyReach, COMBAT.enemyHalfAngle, "#fb7185", 0.35);
+      drawAttackArc(enemy.attackOrigin, enemy.attackAngle, spec.reach, COMBAT.enemyHalfAngle, "#fb7185", 0.35);
     }
   });
 }
@@ -736,15 +740,14 @@ function drawEffects() {
 function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Draw Zone Environments
   if (state.zone === 0) {
     drawTown();
   } else {
-    if (state.zone === 1) {
-      ctx.fillStyle = "#89b69a";
-      ctx.font = "bold 12px Courier New";
-      ctx.fillText(`GOBLIN GROVE  ·  ${enemies.filter(enemy => enemy.hp > 0).length} remaining`, 18, 25);
-    }
+    const areaNames = { 1: "GOBLIN GROVE", 2: "ORC STRONGHOLD", 3: "KNIGHT CITADEL", 4: "DARK KEEP", 5: "BOSS LAIR" };
+    ctx.fillStyle = "#89b69a";
+    ctx.font = "bold 12px Courier New";
+    ctx.fillText(`${areaNames[state.zone]}  ·  ${enemies.filter(enemy => enemy.hp > 0).length} remaining`, 18, 25);
+
     drawEnemyAttacks();
     drawEnemies();
   }
@@ -759,7 +762,6 @@ function render() {
     ctx.textAlign = "left";
   }
 
-  // Draw Entities & FX
   drawPixelPlayer();
   drawSwordSlash();
   drawEffects();
@@ -785,7 +787,7 @@ function updateHUD() {
       ? enemies.some(enemy => enemy.hp > 0)
         ? "Defeat the boss to unlock the final gate."
         : `Boss defeated! Walk right and pay ${state.tollCost} gold to escape.`
-      : state.zone === 1
+      : state.zone > 0
         ? "Watch the amber attack cone. Step aside or Shift-dodge, then strike back."
         : "Train, collect better swords, then defeat the boss in Area 5.";
   
@@ -797,14 +799,12 @@ function showStatus(msg) {
   document.getElementById("status-banner").textContent = msg;
 }
 
-// Simulate at the original 60 Hz speed, regardless of display refresh rate.
 const STEP_MS = 1000 / 60;
 let lastTimestamp = null;
 let accumulator = 0;
 
 function loop(timestamp) {
   if (lastTimestamp !== null && !document.hidden && !state.won) {
-    // Discard long pauses instead of applying a burst of movement or damage.
     accumulator += Math.min(timestamp - lastTimestamp, 100);
     while (accumulator + 1e-7 >= STEP_MS) {
       updatePlayer();
