@@ -13,8 +13,8 @@ const COMBAT = {
 // Unique combat stats per enemy type
 const ENEMY_SPECS = {
   Goblin:      { speed: 2.1, windup: 30, strikeTicks: 8, recovery: 35, reach: 65, color: "#22c55e", size: 24, hp: 40,   atk: 5,   gold: 15 },
-  Orc:         { speed: 1.6, windup: 45, strikeTicks: 10, recovery: 45, reach: 80, color: "#15803d", size: 30, hp: 120,  atk: 12,  gold: 35 },
-  Knight:      { speed: 1.3, windup: 50, strikeTicks: 12, recovery: 50, reach: 90, color: "#94a3b8", size: 32, hp: 350,  atk: 25,  gold: 80 },
+  Orc:         { speed: 1.6, windup: 66, strikeTicks: 10, recovery: 60, reach: 80, smashRadius: 72, color: "#15803d", size: 30, hp: 120,  atk: 12,  gold: 35 },
+  Knight:      { speed: 1.3, windup: 50, strikeTicks: 12, recovery: 50, reach: 90, guardHalfAngle: Math.PI / 3, turnSpeed: Math.PI / 90, color: "#94a3b8", size: 32, hp: 350,  atk: 25,  gold: 80 },
   "Dark Knight": { speed: 1.1, windup: 60, strikeTicks: 14, recovery: 60, reach: 105, color: "#334155", size: 36, hp: 900,  atk: 50,  gold: 200 },
   BOSS:        { speed: 0.9, windup: 70, strikeTicks: 16, recovery: 70, reach: 130, color: "#b91c1c", size: 52, hp: 3500, atk: 90,  gold: 1000 }
 };
@@ -39,7 +39,8 @@ function playSound(kind) {
   const sounds = {
     swing: [310, 100, 0.07, "triangle"], hit: [180, 65, 0.09, "square"],
     hurt: [110, 45, 0.13, "sawtooth"], dodge: [450, 130, 0.12, "sine"],
-    defeat: [500, 850, 0.14, "triangle"]
+    defeat: [500, 850, 0.14, "triangle"], block: [850, 320, 0.08, "triangle"],
+    smash: [90, 30, 0.18, "triangle"]
   };
   const [start, end, duration, type] = sounds[kind];
   const oscillator = audioContext.createOscillator();
@@ -60,6 +61,31 @@ function playSound(kind) {
 
 function center(entity) {
   return { x: entity.x + entity.size / 2, y: entity.y + entity.size / 2 };
+}
+
+function angleDifference(target, current) {
+  return Math.atan2(Math.sin(target - current), Math.cos(target - current));
+}
+
+function knightIsGuarding(enemy) {
+  return enemy.type === "Knight" && enemy.hp > 0 && !enemy.returning && enemy.phase !== "recovery";
+}
+
+function shieldBlocks(enemy, attacker) {
+  if (!knightIsGuarding(enemy)) return false;
+  const point = center(enemy), source = center(attacker);
+  const angle = Math.atan2(source.y - point.y, source.x - point.x);
+  return Math.abs(angleDifference(angle, enemy.facingAngle)) <= ENEMY_SPECS.Knight.guardHalfAngle;
+}
+
+function enemyAttackHits(enemy, target) {
+  const spec = ENEMY_SPECS[enemy.type];
+  if (spec.smashRadius) {
+    const point = center(target);
+    return enemy.attackTarget !== null &&
+      Math.hypot(point.x - enemy.attackTarget.x, point.y - enemy.attackTarget.y) <= spec.smashRadius + target.size / 2;
+  }
+  return inAttackArc(enemy.attackOrigin, enemy.attackAngle, spec.reach, COMBAT.enemyHalfAngle, target);
 }
 
 function movementVector() {
@@ -229,6 +255,9 @@ function resetEnemyCombat(enemy) {
   enemy.phaseTimer = 0;
   enemy.attackAngle = 0;
   enemy.attackOrigin = null;
+  enemy.attackTarget = null;
+  enemy.facingAngle = Math.PI;
+  enemy.blockFlash = 0;
   enemy.hitFlash = 0;
 }
 
@@ -271,6 +300,9 @@ function spawnZoneEnemies() {
       phaseTimer: 0,
       attackAngle: 0,
       attackOrigin: null,
+      attackTarget: null,
+      facingAngle: Math.PI,
+      blockFlash: 0,
       hitFlash: 0,
       respawnTimer: 0
     });
@@ -314,6 +346,12 @@ function triggerAttack() {
   enemies.forEach(enemy => {
     if (enemy.hp <= 0) return;
     if (inAttackArc(player.swingOrigin, player.swingAngle, COMBAT.swordReach, COMBAT.swordHalfAngle, enemy)) {
+      if (shieldBlocks(enemy, player)) {
+        enemy.blockFlash = 10;
+        addEffect(center(enemy).x, enemy.y - 52, "BLOCKED", "#bae6fd");
+        playSound("block");
+        return;
+      }
       enemy.hp -= state.totalAttackPower;
       enemy.hitFlash = 7;
       const point = center(enemy);
@@ -494,7 +532,11 @@ function updateEnemyAI(enemy) {
     if (enemy.phaseTimer <= 0) {
       enemy.phase = "strike";
       enemy.phaseTimer = spec.strikeTicks;
-      if (inAttackArc(enemy.attackOrigin, enemy.attackAngle, spec.reach, COMBAT.enemyHalfAngle, player)) {
+      if (spec.smashRadius) {
+        playSound("smash");
+        addEffect(enemy.attackTarget.x, enemy.attackTarget.y, "SMASH!", "#fdba74", 24);
+      }
+      if (enemyAttackHits(enemy, player)) {
         if (player.dodgeTimer > 0) {
           const point = center(player);
           addEffect(point.x, player.y - 8, "DODGED", "#67e8f9");
@@ -535,11 +577,20 @@ function updateEnemyAI(enemy) {
 
   if (!enemy.active) return false;
 
+  const targetAngle = Math.atan2(target.y - point.y, target.x - point.x);
+  if (enemy.type === "Knight") {
+    const turn = angleDifference(targetAngle, enemy.facingAngle);
+    enemy.facingAngle += Math.max(-spec.turnSpeed, Math.min(spec.turnSpeed, turn));
+    // A knight must turn its shield to face the player before committing a strike.
+    if (distance <= spec.reach - 8 && Math.abs(angleDifference(targetAngle, enemy.facingAngle)) > 0.25) return false;
+  }
+
   if (distance <= spec.reach - 8) {
     enemy.phase = "windup";
     enemy.phaseTimer = spec.windup;
     enemy.attackOrigin = point;
-    enemy.attackAngle = Math.atan2(target.y - point.y, target.x - point.x);
+    enemy.attackAngle = enemy.type === "Knight" ? enemy.facingAngle : targetAngle;
+    enemy.attackTarget = spec.smashRadius ? { ...target } : null;
   } else {
     moveEnemyTowards(enemy, target.x - enemy.size / 2, target.y - enemy.size / 2, true);
   }
@@ -576,6 +627,7 @@ function updateEnemies() {
     }
 
     if (enemy.hitFlash > 0) enemy.hitFlash--;
+    if (enemy.blockFlash > 0) enemy.blockFlash--;
     if (updateEnemyAI(enemy)) return;
   }
 }
@@ -669,6 +721,50 @@ function drawTown() {
   });
 }
 
+function drawKnightShield(enemy) {
+  const point = center(enemy);
+  const guarding = knightIsGuarding(enemy);
+  const angle = guarding ? enemy.facingAngle : Math.PI / 2;
+  const forward = { x: Math.cos(angle), y: Math.sin(angle) };
+  const side = { x: -forward.y, y: forward.x };
+  const radius = enemy.size / 2 + 9;
+  const x = point.x + forward.x * radius, y = point.y + forward.y * radius;
+  const color = enemy.blockFlash > 0 ? "#ffffff" : guarding ? "#7dd3fc" : "#64748b";
+  ctx.save();
+  if (guarding) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius, angle - ENEMY_SPECS.Knight.guardHalfAngle, angle + ENEMY_SPECS.Knight.guardHalfAngle);
+    ctx.stroke();
+  }
+  // A kite shield points toward the guarded side; it hangs down during recovery.
+  ctx.fillStyle = guarding ? "#0c4a6e" : "#334155";
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x + side.x * 10, y + side.y * 10);
+  ctx.lineTo(x + forward.x * 7, y + forward.y * 7);
+  ctx.lineTo(x - side.x * 10, y - side.y * 10);
+  ctx.lineTo(x - forward.x * 5, y - forward.y * 5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawOrcClub(enemy) {
+  const raised = enemy.phase === "windup";
+  const x = enemy.x + enemy.size + 7;
+  const y = enemy.y + (raised ? -17 : 10);
+  ctx.fillStyle = "#92400e";
+  ctx.fillRect(x - 2, y, 4, 24);
+  ctx.fillStyle = raised ? "#fbbf24" : "#78716c";
+  ctx.fillRect(x - 8, y - 4, 16, 12);
+  ctx.fillStyle = "#d6d3d1";
+  ctx.fillRect(x - 8, y - 4, 16, 3);
+}
+
 function drawEnemies() {
   enemies.forEach(enemy => {
     if (enemy.hp <= 0) return;
@@ -683,10 +779,17 @@ function drawEnemies() {
     ctx.fillRect(enemy.x + Math.max(5, enemy.size - 9), enemy.y + 7, 4, 4);
     ctx.fillRect(enemy.x + 8, enemy.y + Math.max(12, enemy.size - 10), Math.max(4, enemy.size - 16), 3);
 
+    if (enemy.type === "Knight") drawKnightShield(enemy);
+    if (enemy.type === "Orc") drawOrcClub(enemy);
+
     if (enemy.phase === "windup") {
       ctx.fillStyle = "#fbbf24";
       ctx.font = "bold 18px Courier New";
       ctx.fillText("!", enemy.x + enemy.size / 2 - 5, enemy.y - 38);
+    } else if (enemy.type === "Knight" && enemy.phase === "recovery") {
+      ctx.fillStyle = "#67e8f9";
+      ctx.font = "bold 12px Courier New";
+      ctx.fillText("OPEN", enemy.x + enemy.size / 2 - 14, enemy.y - 38);
     }
 
     const barW = enemy.size + 10;
@@ -714,6 +817,42 @@ function drawEnemyAttacks() {
     if (enemy.hp <= 0 || !enemy.attackOrigin) return;
     const spec = ENEMY_SPECS[enemy.type];
 
+    if (spec.smashRadius) {
+      if (!enemy.attackTarget || !["windup", "strike"].includes(enemy.phase)) return;
+      const target = enemy.attackTarget;
+      const progress = 1 - enemy.phaseTimer / spec.windup;
+      const striking = enemy.phase === "strike";
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, spec.smashRadius, 0, Math.PI * 2);
+      ctx.fillStyle = striking ? "#fb7185" : "#fbbf24";
+      ctx.globalAlpha = striking ? 0.4 : 0.08 + progress * 0.18;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = striking ? "#fb7185" : "#fbbf24";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(target.x - 8, target.y);
+      ctx.lineTo(target.x + 8, target.y);
+      ctx.moveTo(target.x, target.y - 8);
+      ctx.lineTo(target.x, target.y + 8);
+      ctx.stroke();
+      if (!striking) {
+        ctx.strokeStyle = "#fff2b2";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(target.x, target.y, spec.smashRadius + 4, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+        ctx.stroke();
+        ctx.font = "bold 12px Courier New";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#fde68a";
+        ctx.fillText("SMASH", target.x, target.y - spec.smashRadius - 10);
+      }
+      ctx.restore();
+      return;
+    }
+
     if (enemy.phase === "windup") {
       const progress = 1 - enemy.phaseTimer / spec.windup;
       drawAttackArc(enemy.attackOrigin, enemy.attackAngle, spec.reach, COMBAT.enemyHalfAngle, "#fbbf24", 0.08 + progress * 0.22);
@@ -721,7 +860,9 @@ function drawEnemyAttacks() {
       ctx.lineWidth = 3;
       ctx.beginPath();
       // Keep the whole countdown outside the square body, including its corners.
-      const countdownRadius = Math.ceil(enemy.size / Math.SQRT2) + 3;
+      const countdownRadius = enemy.type === "Knight"
+        ? enemy.size / 2 + 15
+        : Math.ceil(enemy.size / Math.SQRT2) + 3;
       ctx.arc(enemy.attackOrigin.x, enemy.attackOrigin.y, countdownRadius, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
       ctx.stroke();
     } else if (enemy.phase === "strike") {
@@ -797,6 +938,10 @@ function updateHUD() {
       ? enemies.some(enemy => enemy.hp > 0)
         ? "Defeat the boss to unlock the final gate."
         : `Boss defeated! Walk right and pay ${state.tollCost} gold to escape.`
+      : state.zone === 2
+        ? "Orcs mark a smash circle. Move clear or Shift-dodge, then punish the recovery."
+      : state.zone === 3
+        ? "Knight shields block the front. Dodge behind them or attack when their shield drops."
       : state.zone > 0
         ? "Watch the amber attack cone. Step aside or Shift-dodge, then strike back."
         : "Train, collect better swords, then defeat the boss in Area 5.";
