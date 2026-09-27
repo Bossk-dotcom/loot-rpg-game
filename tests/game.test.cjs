@@ -477,28 +477,34 @@ for (const [zone, type] of monsterZones) {
     assert.equal(game.run('enemies[0].hp'),1);
   });
 
-  test(`${type}: its countdown ring remains outside the body that is drawn over it`, () => {
+  test(`${type}: its countdown ring remains outside the body or smash area`, () => {
     const game=boot();
     monsterEncounter(game,zone);
     game.run('player.x=265; updateEnemies(); enemies[0].phaseTimer--;');
     const size=game.run('enemies[0].size');
-    const origin=JSON.parse(game.run('JSON.stringify(enemies[0].attackOrigin)'));
+    const origin=JSON.parse(game.run('JSON.stringify(enemies[0].attackTarget || enemies[0].attackOrigin)'));
     game.drawCalls.length=0;
     game.run('render();');
     const arcs=game.drawCalls.filter(call=>call.method==='arc' && call.args[0]===origin.x && call.args[1]===origin.y);
-    assert.equal(arcs.length,2);
+    assert.ok(arcs.length >= 2);
     const countdown=arcs.find(call=>call.args[3]===-Math.PI/2);
     assert.ok(countdown.args[2] > size / Math.SQRT2, 'The body must not cover any part of its countdown ring');
+    if (type === 'Orc') assert.ok(countdown.args[2] > game.run('ENEMY_SPECS.Orc.smashRadius'));
+    if (type === 'Knight') assert.ok(countdown.args[2] > size / 2 + 12, 'The shield must not cover the countdown');
   });
 
   test(`${type}: death and respawn clear every transient attack field`, () => {
     const game=boot();
     monsterEncounter(game,zone);
-    game.run('player.x=265; updateEnemies(); state.totalAttackPower=10000; player.facing="right"; triggerAttack();');
+    game.run('player.x=265; updateEnemies(); state.totalAttackPower=10000; player.facing="right";');
+    if (type === 'Knight') game.run('player.x=350; player.facing="left";'); // Flank its committed guard.
+    game.run('triggerAttack();');
     const reward=game.run('enemies[0].goldValue');
     assert.equal(game.run('state.gold'),reward);
     assert.equal(game.run('enemies[0].hp'),0);
     assert.equal(game.run('enemies[0].attackOrigin'),null);
+    assert.equal(game.run('enemies[0].attackTarget'),null);
+    assert.equal(game.run('enemies[0].blockFlash'),0);
     assert.equal(game.run('enemies[0].phaseTimer'),0);
     assert.equal(game.run('enemies[0].active'),false);
     game.run('player.x=10; for(let i=0;i<COMBAT.respawnTime;i++)updateEnemies();');
@@ -516,3 +522,121 @@ for (const [zone, type] of monsterZones) {
     }
   });
 }
+
+test('Orc smash locks its ground target and draws the same radius used for damage', () => {
+  const game = boot();
+  monsterEncounter(game, 2);
+  game.run('player.x=265; updateEnemies();');
+  const target = JSON.parse(game.run('JSON.stringify(enemies[0].attackTarget)'));
+  assert.deepEqual(target, {x:279, y:214});
+  game.run('player.x=500; player.y=350; for(let i=0;i<20;i++)updateEnemies(); render();');
+  assert.equal(game.run('enemies[0].attackTarget.x'), target.x);
+  assert.equal(game.run('enemies[0].attackTarget.y'), target.y);
+  const disc = game.drawCalls.find(call => call.method === 'arc' && call.args[0] === target.x && call.args[1] === target.y && call.args[3] === 0);
+  assert.equal(disc.args[2], game.run('ENEMY_SPECS.Orc.smashRadius'));
+  game.run('enemies[0].phaseTimer=1; updateEnemies();');
+  assert.equal(game.run('state.hp'), 100);
+});
+
+for (const [dx, dy, hit] of [[0,0,true], [80,0,true], [-80,0,true], [0,80,true], [0,-80,true], [87,0,false], [62,62,false]]) {
+  test(`Orc smash circular boundary at (${dx}, ${dy}) ${hit ? 'hits' : 'misses'}`, () => {
+    const game = boot();
+    monsterEncounter(game, 2);
+    game.run(`player.x=265; updateEnemies(); player.x=enemies[0].attackTarget.x-14+${dx}; player.y=enemies[0].attackTarget.y-14+${dy}; enemies[0].phaseTimer=1; updateEnemies();`);
+    assert.equal(game.run('state.hp'), hit ? 88 : 100);
+    game.run('player.invulnerableTimer=0; for(let i=0;i<ENEMY_SPECS.Orc.strikeTicks;i++)updateEnemies();');
+    assert.equal(game.run('state.hp'), hit ? 88 : 100, 'A lingering smash graphic must not deal repeated damage');
+    assert.equal(game.run('enemies[0].phase'), 'recovery');
+  });
+}
+
+test('Orc smash respects dodge timing and the damage grace period', () => {
+  for (const protection of ['dodge', 'grace', 'expired']) {
+    const game = boot();
+    monsterEncounter(game, 2);
+    game.run('player.x=265; updateEnemies();');
+    if (protection === 'grace') game.run('player.invulnerableTimer=10;');
+    else {
+      game.run('triggerDodge();');
+      if (protection === 'expired') game.run('player.dodgeX=0; player.dodgeY=0; for(let i=0;i<COMBAT.dodgeTicks;i++)updatePlayer();');
+    }
+    game.run('enemies[0].phaseTimer=1; updateEnemies();');
+    assert.equal(game.run('state.hp'), protection === 'expired' ? 88 : 100);
+  }
+});
+
+for (const [angle, frontX, frontY, frontFacing, backX, backY, backFacing] of [
+  [0,350,202,'left',250,202,'right'],
+  [Math.PI/2,302,250,'up',302,150,'down'],
+  [Math.PI,250,202,'right',350,202,'left'],
+  [-Math.PI/2,302,150,'down',302,250,'up']
+]) {
+  test(`Knight guard at ${angle.toFixed(2)} radians blocks the front but allows a rear hit`, () => {
+    const game = boot();
+    monsterEncounter(game, 3);
+    game.run(`enemies[0].facingAngle=${angle}; player.x=${frontX}; player.y=${frontY}; player.facing='${frontFacing}'; triggerAttack(); render();`);
+    assert.equal(game.run('enemies[0].hp'), 350);
+    assert.equal(game.run('enemies[0].x'), 300);
+    assert.equal(game.run('enemies[0].hitFlash'), 0);
+    assert.ok(game.run('enemies[0].blockFlash') > 0);
+    assert.ok(game.run('effects.some(effect=>effect.text === "BLOCKED")'));
+    assert.equal(game.run('state.gold'), 0);
+    game.run(`player.swinging=false; player.x=${backX}; player.y=${backY}; player.facing='${backFacing}'; triggerAttack();`);
+    assert.equal(game.run('enemies[0].hp'), 340);
+  });
+}
+
+test('Knight guard covers its visible front arc without blocking side attacks', () => {
+  const game = boot();
+  monsterEncounter(game, 3);
+  game.run('enemies[0].facingAngle=0;');
+  for (const angle of [-Math.PI/3-0.01, -Math.PI/3+0.01, Math.PI/3-0.01, Math.PI/3+0.01]) {
+    assert.equal(game.run(`shieldBlocks(enemies[0], {x:316+50*Math.cos(${angle})-14,y:216+50*Math.sin(${angle})-14,size:28})`), Math.abs(angle) < Math.PI/3);
+  }
+});
+
+test('Knight guard turns at a limited speed and stays committed through its attack', () => {
+  const game = boot();
+  monsterEncounter(game, 3);
+  game.run('player.x=350; player.y=202; updateEnemies();');
+  assert.equal(game.run('enemies[0].phase'), 'idle', 'A knight cannot snap around to attack');
+  assert.ok(Math.abs(game.run('enemies[0].facingAngle') - Math.PI) <= game.run('ENEMY_SPECS.Knight.turnSpeed') + 1e-9);
+  game.run('for(let i=0;i<95;i++)updateEnemies();');
+  assert.equal(game.run('enemies[0].phase'), 'windup');
+  const facing = game.run('enemies[0].facingAngle');
+  game.run('player.x=250; enemies[0].phaseTimer=1; updateEnemies();');
+  assert.equal(game.run('enemies[0].facingAngle'), facing);
+  assert.equal(game.run('enemies[0].attackAngle'), facing);
+  assert.equal(game.run('state.hp'), 100, 'Flanking escapes the committed attack');
+});
+
+test('Knight blocks during windup and strike, then opens its front for the entire recovery', () => {
+  const game = boot();
+  monsterEncounter(game, 3);
+  game.run('player.x=265; player.facing="right"; updateEnemies(); triggerAttack();');
+  assert.equal(game.run('enemies[0].hp'), 350);
+  assert.equal(game.run('enemies[0].phase'), 'windup');
+  game.run('enemies[0].phaseTimer=1; updateEnemies(); player.swinging=false; triggerAttack();');
+  assert.equal(game.run('enemies[0].hp'), 350);
+  game.run('for(let i=0;i<ENEMY_SPECS.Knight.strikeTicks;i++)updateEnemies(); render();');
+  assert.equal(game.run('knightIsGuarding(enemies[0])'), false);
+  assert.ok(game.drawCalls.some(call => call.method === 'fillText' && call.args[0] === 'OPEN'));
+  game.run('player.swinging=false; triggerAttack();');
+  assert.equal(game.run('enemies[0].hp'), 340);
+  game.run('for(let i=0;i<ENEMY_SPECS.Knight.recovery-1;i++)updateEnemies();');
+  assert.equal(game.run('knightIsGuarding(enemies[0])'), false);
+  game.run('updateEnemies();');
+  assert.equal(game.run('knightIsGuarding(enemies[0])'), true);
+});
+
+test('Knight guard drops during retreat and clears its block flash on respawn', () => {
+  const game = boot();
+  monsterEncounter(game, 3);
+  game.run('player.x=265; player.facing="right"; triggerAttack(); enemies[0].returning=true; player.swinging=false; state.totalAttackPower=350; triggerAttack();');
+  assert.equal(game.run('enemies[0].hp'), 0);
+  assert.equal(game.run('state.gold'), 80);
+  game.run('player.x=10; for(let i=0;i<COMBAT.respawnTime;i++)updateEnemies();');
+  assert.equal(game.run('enemies[0].blockFlash'), 0);
+  assert.equal(game.run('enemies[0].facingAngle'), Math.PI);
+  assert.equal(game.run('knightIsGuarding(enemies[0])'), true);
+});
