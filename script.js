@@ -222,6 +222,16 @@ const chestShops = [
 
 let enemies = [];
 
+function resetEnemyCombat(enemy) {
+  enemy.active = false;
+  enemy.returning = false;
+  enemy.phase = "idle";
+  enemy.phaseTimer = 0;
+  enemy.attackAngle = 0;
+  enemy.attackOrigin = null;
+  enemy.hitFlash = 0;
+}
+
 function spawnZoneEnemies() {
   enemies = [];
   effects = [];
@@ -319,6 +329,7 @@ function triggerAttack() {
       playSound("hit");
       if (enemy.hp <= 0) {
         enemy.hp = 0;
+        resetEnemyCombat(enemy);
         state.gold += enemy.goldValue;
         showStatus(`Defeated ${enemy.type}! Earned 💰${enemy.goldValue}`);
         addEffect(point.x, enemy.y - 10, `+${enemy.goldValue} gold`, "#facc15", 50);
@@ -554,13 +565,10 @@ function updateEnemies() {
       if (enemy.respawnTimer > 0) {
         enemy.respawnTimer--;
         if (enemy.respawnTimer <= 0) {
-          const spec = ENEMY_SPECS[enemy.type];
-          enemy.hp = spec.hp;
+          enemy.hp = enemy.maxHp;
           enemy.x = enemy.homeX;
           enemy.y = enemy.homeY;
-          enemy.phase = "idle";
-          enemy.active = false;
-          enemy.returning = false;
+          resetEnemyCombat(enemy);
           addEffect(center(enemy).x, center(enemy).y, "RESPAWNED", "#a7f3d0", 40);
         }
       }
@@ -712,7 +720,9 @@ function drawEnemyAttacks() {
       ctx.strokeStyle = "#fff2b2";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(enemy.attackOrigin.x, enemy.attackOrigin.y, 19, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+      // Keep the whole countdown outside the square body, including its corners.
+      const countdownRadius = Math.ceil(enemy.size / Math.SQRT2) + 3;
+      ctx.arc(enemy.attackOrigin.x, enemy.attackOrigin.y, countdownRadius, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
       ctx.stroke();
     } else if (enemy.phase === "strike") {
       drawAttackArc(enemy.attackOrigin, enemy.attackAngle, spec.reach, COMBAT.enemyHalfAngle, "#fb7185", 0.35);
