@@ -5,13 +5,24 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'script.js'), 'utf8');
+const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const documentIds = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
 
 // Run the real game logic with a minimal DOM; no browser or packages required.
 function boot() {
   const elements = new Map();
   const windowListeners = {};
   const documentListeners = {};
-  const drawing = new Proxy({}, { get: () => () => {} });
+  const drawCalls = [];
+  const frames = [];
+  const drawing = new Proxy({}, { get(target, method) {
+    if (method in target) return target[method];
+    return (...args) => {
+      const positions = {arc:[0,1,2,3,4], fillRect:[0,1,2,3], strokeRect:[0,1,2,3], clearRect:[0,1,2,3], moveTo:[0,1], lineTo:[0,1], fillText:[1,2], strokeText:[1,2]}[method] || [];
+      positions.forEach(index => assert.ok(Number.isFinite(args[index]), `${method} argument ${index} must be finite`));
+      drawCalls.push({method, args});
+    };
+  }});
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
       style: {}, textContent: '', open: false, listeners: {},
@@ -27,18 +38,18 @@ function boot() {
   }
   const document = {
     hidden: false,
-    getElementById: element,
+    getElementById: id => documentIds.has(id) ? element(id) : null,
     addEventListener(name, handler) { documentListeners[name] = handler; }
   };
   const context = vm.createContext({
     document,
     window: { addEventListener(name, handler) { windowListeners[name] = handler; } },
-    requestAnimationFrame: () => {}
+    requestAnimationFrame: callback => frames.push(callback)
   });
   vm.runInContext(source, context);
   return {
     run: code => vm.runInContext(code, context),
-    element, document, windowListeners, documentListeners
+    element, document, windowListeners, documentListeners, drawCalls, frames
   };
 }
 
@@ -252,19 +263,19 @@ test('nearby goblins pursue; distant goblins stay home', () => {
   assert.equal(distant.run('enemies[0].active'), false);
 });
 
-test('no more than three goblins can pursue at once', () => {
+test('pursuers obey the configured encounter cap', () => {
   const game = boot();
   game.run('state.zone = 1; spawnZoneEnemies(); player.x = 450; player.y = 180; updateEnemies();');
-  assert.equal(game.run('enemies.filter(enemy => enemy.active).length'), 3);
+  assert.equal(game.run('enemies.filter(enemy => enemy.active).length'), game.run('COMBAT.maxPursuers'));
 });
 
 test('pursuers give up at their leash and return home without healing', () => {
   const game = boot();
   goblinEncounter(game);
-  game.run('enemies[0].active = true; enemies[0].hp = 20; enemies[0].x = 500; player.x = 540; updateEnemies();');
+  game.run('enemies[0].active = true; enemies[0].hp = 20; enemies[0].x = enemies[0].homeX + COMBAT.leash + 1; player.x = enemies[0].x + 40; updateEnemies();');
   assert.equal(game.run('enemies[0].active'), false);
   assert.equal(game.run('enemies[0].returning'), true);
-  game.run('player.x = 10; for(let i=0;i<130;i++) updateEnemies();');
+  game.run('player.x = 10; for(let i=0;i<Math.ceil(COMBAT.leash / ENEMY_SPECS.Goblin.speed) + 5;i++) updateEnemies();');
   assert.ok(Math.abs(game.run('enemies[0].x') - 250) < 3);
   assert.equal(game.run('enemies[0].returning'), false);
   assert.equal(game.run('enemies[0].hp'), 20);
@@ -276,7 +287,7 @@ test('windup gives a full warning, commits direction, and can be sidestepped', (
   game.run('updateEnemies();');
   assert.equal(game.run('enemies[0].phase'), 'windup');
   const angle = game.run('enemies[0].attackAngle');
-  game.run('for(let i=0;i<32;i++) updateEnemies();');
+  game.run('for(let i=0;i<ENEMY_SPECS.Goblin.windup-1;i++) updateEnemies();');
   assert.equal(game.run('state.hp'), 100);
   game.run('player.x = 310; updateEnemies();');
   assert.equal(game.run('enemies[0].phase'), 'strike');
@@ -349,9 +360,10 @@ test('simultaneous goblin hits get a short grace window instead of stacking', ()
   assert.equal(game.run('state.hp'), 95);
 });
 
-test('dodge also protects against later enemies without changing their AI', () => {
+test('dodge also protects against an orc strike', () => {
   const game = boot();
-  game.run('state.zone=2; spawnZoneEnemies(); enemies=enemies.slice(0,1); player.x=enemies[0].x; player.y=enemies[0].y; enemies[0].attackTimer=81; triggerDodge(); updateEnemies();');
+  game.run('state.zone=2; spawnZoneEnemies(); enemies=enemies.slice(0,1); player.x=enemies[0].x; player.y=enemies[0].y; updateEnemies(); triggerDodge(); enemies[0].phaseTimer=1; updateEnemies();');
+  assert.equal(game.run('enemies[0].phase'), 'strike');
   assert.equal(game.run('state.hp'), 100);
 });
 
@@ -399,3 +411,108 @@ test('dodge and a moving goblin encounter remain consistent across frame rates',
   assert.equal(outcomes[0], outcomes[1]);
   assert.equal(outcomes[1], outcomes[2]);
 });
+
+test('real HTML and game script boot, render town, handle input and schedule the next frame', () => {
+  const game = boot();
+  assert.equal(game.frames.length, 1);
+  game.frames.shift()(0);
+  assert.equal(game.frames.length, 1);
+  assert.ok(game.drawCalls.some(call => call.method === 'fillText' && call.args[0] === 'DUMMY'));
+  game.windowListeners.keydown({key:' ', repeat:false, preventDefault(){}});
+  assert.equal(game.element('atk-text').textContent, 11);
+  assert.ok(game.windowListeners.keyup);
+});
+
+const monsterZones = [[1,'Goblin'],[2,'Orc'],[3,'Knight'],[4,'Dark Knight'],[5,'BOSS']];
+function monsterEncounter(game, zone) {
+  game.run(`state.zone=${zone}; spawnZoneEnemies(); enemies=enemies.slice(0,1);
+    enemies[0].x=300; enemies[0].y=200; enemies[0].homeX=300; enemies[0].homeY=200;
+    player.x=180; player.y=200;`);
+}
+
+for (const [zone, type] of monsterZones) {
+  test(`${type}: pursues, warns for its configured duration, hits once and recovers`, () => {
+    const game = boot();
+    monsterEncounter(game, zone);
+    const spec = JSON.parse(game.run(`JSON.stringify(ENEMY_SPECS['${type}'])`));
+    const x = game.run('enemies[0].x');
+    game.run('updateEnemies();');
+    assert.ok(game.run('enemies[0].x') < x);
+    game.run('player.x=enemies[0].x-35; player.y=enemies[0].y; updateEnemies(); render();');
+    assert.equal(game.run('enemies[0].phase'), 'windup');
+    game.run(`for(let i=0;i<${spec.windup-1};i++) updateEnemies();`);
+    assert.equal(game.run('state.hp'), 100);
+    game.run('updateEnemies(); render();');
+    assert.equal(game.run('state.hp'), 100-spec.atk);
+    assert.equal(game.run('enemies[0].phase'), 'strike');
+    game.run(`for(let i=0;i<${spec.strikeTicks};i++) updateEnemies();`);
+    assert.equal(game.run('enemies[0].phase'), 'recovery');
+    assert.equal(game.run('state.hp'), 100-spec.atk);
+    game.run(`for(let i=0;i<${spec.recovery};i++) updateEnemies();`);
+    assert.equal(game.run('enemies[0].phase'), 'idle');
+  });
+
+  test(`${type}: a sidestep and a correctly timed dodge avoid committed damage`, () => {
+    for (const dodge of [false,true]) {
+      const game = boot();
+      monsterEncounter(game,zone);
+      game.run('player.x=265; updateEnemies();');
+      const angle = game.run('enemies[0].attackAngle');
+      game.run('enemies[0].phaseTimer=1;');
+      game.run(dodge ? 'triggerDodge();' : 'player.x=500;');
+      game.run('updateEnemies();');
+      assert.equal(game.run('enemies[0].attackAngle'),angle);
+      assert.equal(game.run('state.hp'),100);
+      assert.equal(game.run('enemies[0].phase'),'strike');
+    }
+  });
+
+  test(`${type}: retreat returns home without restoring health`, () => {
+    const game=boot();
+    monsterEncounter(game,zone);
+    game.run('enemies[0].active=true; enemies[0].hp=1; enemies[0].x=590; player.x=620; updateEnemies();');
+    assert.equal(game.run('enemies[0].returning'),true);
+    game.run(`player.x=10; for(let i=0;i<Math.ceil(300/ENEMY_SPECS['${type}'].speed)+10;i++) updateEnemies();`);
+    assert.ok(Math.abs(game.run('enemies[0].x')-300)<3);
+    assert.equal(game.run('enemies[0].hp'),1);
+  });
+
+  test(`${type}: its countdown ring remains outside the body that is drawn over it`, () => {
+    const game=boot();
+    monsterEncounter(game,zone);
+    game.run('player.x=265; updateEnemies(); enemies[0].phaseTimer--;');
+    const size=game.run('enemies[0].size');
+    const origin=JSON.parse(game.run('JSON.stringify(enemies[0].attackOrigin)'));
+    game.drawCalls.length=0;
+    game.run('render();');
+    const arcs=game.drawCalls.filter(call=>call.method==='arc' && call.args[0]===origin.x && call.args[1]===origin.y);
+    assert.equal(arcs.length,2);
+    const countdown=arcs.find(call=>call.args[3]===-Math.PI/2);
+    assert.ok(countdown.args[2] > size / Math.SQRT2, 'The body must not cover any part of its countdown ring');
+  });
+
+  test(`${type}: death and respawn clear every transient attack field`, () => {
+    const game=boot();
+    monsterEncounter(game,zone);
+    game.run('player.x=265; updateEnemies(); state.totalAttackPower=10000; player.facing="right"; triggerAttack();');
+    const reward=game.run('enemies[0].goldValue');
+    assert.equal(game.run('state.gold'),reward);
+    assert.equal(game.run('enemies[0].hp'),0);
+    assert.equal(game.run('enemies[0].attackOrigin'),null);
+    assert.equal(game.run('enemies[0].phaseTimer'),0);
+    assert.equal(game.run('enemies[0].active'),false);
+    game.run('player.x=10; for(let i=0;i<COMBAT.respawnTime;i++)updateEnemies();');
+    assert.equal(game.run('state.gold'),reward);
+    if(zone===5) {
+      assert.equal(game.run('enemies[0].hp'),0);
+      assert.match(game.element('objective-text').textContent,/Boss defeated/);
+    } else {
+      assert.equal(game.run('enemies[0].hp'),game.run('enemies[0].maxHp'));
+      assert.equal(game.run('enemies[0].hitFlash'),0);
+      assert.equal(game.run('enemies[0].x'),300);
+      assert.equal(game.run('enemies[0].y'),200);
+      assert.equal(game.run('enemies[0].phase'),'idle');
+      assert.equal(game.run('enemies[0].respawnTimer'),0);
+    }
+  });
+}
