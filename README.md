@@ -8,7 +8,7 @@ A small browser RPG built with HTML, CSS and JavaScript. Open `index.html` in a 
 
 - Move with WASD or the arrow keys. Hold Space or left-click to swing in the direction you face.
 - Press Shift to dodge in your movement direction (or your facing direction when standing still). A dodge lasts 0.2 seconds, avoids damage, cancels your swing, and has a 1.2-second cooldown shown above the arena.
-- Train at the town dummy to gain attack power. Fight enemies for gold, then swing near a chest shop to buy a sword that increases your training gains.
+- Train at the town dummy to gain attack power. Fight enemies for gold, then swing near the Common chest to buy a sword that increases your training gains. Each chest has a 53% Common, 39% Rare, 5% Epic and 3% Legendary drop chance.
 - Travel right through the five battle areas. Earlier encounters are optional; you can return left to town and revisit areas to farm gold.
 - Defeat the boss in Area 5, then walk through the right-hand gate and pay 500 gold to finish the adventure. The boss drops 1,000 gold.
 - Use **Start a new adventure** on the victory screen to reset your run. Progress is currently held in memory and resets on reload.

@@ -239,11 +239,7 @@ function restartGame() {
 // Town Objects
 const dummy = { x: 120, y: 180, width: 32, height: 48 };
 const chestShops = [
-  { tier: "Common", cost: 50, x: 300, y: 100, color: "#aaaaaa" },
-  { tier: "Rare", cost: 150, x: 420, y: 100, color: "#3b82f6" },
-  { tier: "Epic", cost: 400, x: 540, y: 100, color: "#a855f7" },
-  { tier: "Legendary", cost: 1000, x: 660, y: 100, color: "#eab308" },
-  { tier: "BROKEN", cost: 5000, x: 480, y: 320, color: "#ef4444" }
+  { tier: "Common", cost: 50, x: 300, y: 100, color: "#aaaaaa" }
 ];
 
 let enemies = [];
@@ -383,15 +379,14 @@ function triggerAttack() {
 
 function buyChest(tier) {
   const roll = Math.random() * 100;
-  let rarity = "Common";
+  let rarity;
 
-  if (tier === "Common") rarity = roll < 15 ? "Rare" : "Common";
-  else if (tier === "Rare") rarity = roll < 20 ? "Epic" : "Rare";
-  else if (tier === "Epic") rarity = roll < 15 ? "Legendary" : "Epic";
-  else if (tier === "Legendary") rarity = roll < 0.1 ? "BROKEN" : "Legendary";
-  else if (tier === "BROKEN") rarity = roll < 1.0 ? "BROKEN" : "Legendary";
+  if (roll < 53) rarity = "Common";
+  else if (roll < 92) rarity = "Rare";
+  else if (roll < 97) rarity = "Epic";
+  else rarity = "Legendary";
 
-  const powerValues = { Common: 2, Rare: 8, Epic: 25, Legendary: 75, BROKEN: 300 };
+  const powerValues = { Common: 2, Rare: 8, Epic: 25, Legendary: 75 };
   const pwr = powerValues[rarity];
 
   state.equippedSword = { name: `${rarity} Claymore`, power: pwr, rarity: rarity };
