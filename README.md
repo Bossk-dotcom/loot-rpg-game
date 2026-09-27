@@ -1,5 +1,7 @@
 # Pixel Loot & Battle RPG
 
+**[Play the game in your browser](https://bossk-dotcom.github.io/loot-rpg-game/)**
+
 A small browser RPG built with HTML, CSS and JavaScript. Open `index.html` in a desktop browser to play; no installation or build step is needed.
 
 ## How to play
