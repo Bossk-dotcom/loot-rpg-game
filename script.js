@@ -7,7 +7,7 @@ const COMBAT = {
   dodgeTicks: 12, dodgeCooldown: 72, dodgeSpeed: 13,
   hurtGrace: 18, detection: 220, loseInterest: 300, leash: 280,
   maxPursuers: 4, enemyHalfAngle: Math.PI / 3,
-  respawnTime: 300 // 5 seconds at 60fps
+  respawnTime: 480 // 8 seconds at 60fps
 };
 
 // Unique combat stats per enemy type
