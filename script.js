@@ -239,8 +239,14 @@ function restartGame() {
 // Town Objects
 const dummy = { x: 120, y: 180, width: 32, height: 48 };
 const chestShops = [
-  { tier: "Common", cost: 50, x: 300, y: 100, color: "#aaaaaa" }
+  { tier: "Common", cost: 50, x: 300, y: 100, color: "#aaaaaa" },
+  { tier: "Rare", cost: 150, x: 420, y: 100, color: "#3b82f6" }
 ];
+
+const chestDropThresholds = {
+  Common: { common: 53, rare: 92, epic: 97 },
+  Rare: { common: 40, rare: 85, epic: 95 }
+};
 
 let enemies = [];
 
@@ -379,11 +385,12 @@ function triggerAttack() {
 
 function buyChest(tier) {
   const roll = Math.random() * 100;
+  const thresholds = chestDropThresholds[tier] || chestDropThresholds.Common;
   let rarity;
 
-  if (roll < 53) rarity = "Common";
-  else if (roll < 92) rarity = "Rare";
-  else if (roll < 97) rarity = "Epic";
+  if (roll < thresholds.common) rarity = "Common";
+  else if (roll < thresholds.rare) rarity = "Rare";
+  else if (roll < thresholds.epic) rarity = "Epic";
   else rarity = "Legendary";
 
   const powerValues = { Common: 2, Rare: 8, Epic: 25, Legendary: 75 };

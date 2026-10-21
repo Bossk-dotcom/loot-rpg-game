@@ -156,11 +156,33 @@ test('backtracking to town and farming encounters still work', () => {
   assert.equal(game.run('enemies[0].hp'), 40);
 });
 
-test('town has one common chest with no purchasable rarity-specific chests', () => {
+test('town has common and rare chests with the correct prices', () => {
   const game = boot();
-  assert.equal(game.run('chestShops.length'), 1);
+  assert.equal(game.run('chestShops.length'), 2);
   assert.equal(game.run('chestShops[0].tier'), 'Common');
   assert.equal(game.run('chestShops[0].cost'), 50);
+  assert.equal(game.run('chestShops[1].tier'), 'Rare');
+  assert.equal(game.run('chestShops[1].cost'), 150);
+});
+
+test('rare chest uses the 40/45/10/5 rarity boundaries', () => {
+  const cases = [
+    [0, 'Common'],
+    [0.399999, 'Common'],
+    [0.40, 'Rare'],
+    [0.849999, 'Rare'],
+    [0.85, 'Epic'],
+    [0.949999, 'Epic'],
+    [0.95, 'Legendary'],
+    [0.999999, 'Legendary']
+  ];
+
+  for (const [roll, expected] of cases) {
+    const game = boot();
+    game.run(`Math.random = () => ${roll}; buyChest('Rare');`);
+    assert.equal(game.run('state.equippedSword.rarity'), expected);
+    assert.notEqual(game.run('state.equippedSword.rarity'), 'BROKEN');
+  }
 });
 
 test('common chest uses the 53/39/5/3 rarity boundaries', () => {
