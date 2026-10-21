@@ -65,6 +65,13 @@ body {
   font-size: 13px;
 }
 
+.toolbar-actions,
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
 #dodge-status {
   display: flex;
   align-items: center;
@@ -87,7 +94,9 @@ body {
   transition: width 0.05s linear;
 }
 
-#sound-button {
+#sound-button,
+#inventory-button,
+dialog button {
   background-color: #27272a;
   color: #fff;
   border: 1px solid #52525b;
@@ -139,7 +148,10 @@ dialog {
   background-color: #181824;
   color: #ffffff;
   text-align: center;
-  max-width: 400px;
+  width: min(680px, calc(100vw - 30px));
+  max-width: 680px;
+  max-height: 80vh;
+  overflow-y: auto;
 }
 
 dialog::backdrop {
@@ -166,6 +178,52 @@ dialog::backdrop {
   font-weight: bold;
   border-radius: 4px;
   cursor: pointer;
+}
+
+#inventory-dialog p,
+#upgrade-dialog p,
+#capacity-dialog p {
+  color: #cbd5e1;
+  font-size: 13px;
+  margin: 10px 0 16px;
+}
+
+#inventory-list,
+#upgrade-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.inventory-row,
+.upgrade-row {
+  align-items: center;
+  background: #20202d;
+  border: 1px solid #3f3f52;
+  border-radius: 4px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 9px;
+}
+
+.inventory-row span:last-child {
+  display: flex;
+  gap: 6px;
+}
+
+.upgrade-row small {
+  color: #94a3b8;
+}
+
+dialog button:hover:not(:disabled) {
+  background: #3b3b50;
+}
+
+dialog button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .restart-note {

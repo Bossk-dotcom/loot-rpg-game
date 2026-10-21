@@ -23,21 +23,50 @@
       <div id="dodge-status"><kbd>Shift</kbd> Dodge <span id="dodge-text">Ready</span>
         <div id="dodge-track" aria-hidden="true"><div id="dodge-fill"></div></div>
       </div>
-      <button id="sound-button" type="button" aria-pressed="false" aria-label="Mute combat sounds">Sound: On</button>
+      <div class="toolbar-actions">
+        <button id="inventory-button" type="button">Inventory <span id="inventory-count">1/100</span></button>
+        <button id="sound-button" type="button" aria-pressed="false" aria-label="Mute combat sounds">Sound: On</button>
+      </div>
     </div>
     <div id="canvas-container">
       <canvas id="gameCanvas" width="800" height="450" tabindex="0" aria-label="Game area. Move with WASD or arrow keys. Hold Space or left-click to swing. Press Shift to dodge."></canvas>
-      <div id="controls-tip"><b>WASD / Arrows</b> Move · <b>Hold Space / Left-Click</b> Swing · <b>Shift</b> Dodge</div>
+      <div id="controls-tip"><b>WASD / Arrows</b> Move · <b>Hold Space / Left-Click</b> Swing · <b>Shift</b> Dodge · <b>E</b> Interact · <b>I</b> Inventory</div>
     </div>
 
     <div id="status-banner" role="status">Welcome to Town! Walk right to battle or hit the dummy to train!</div>
   </div>
 
+  <dialog id="inventory-dialog" aria-labelledby="inventory-title">
+    <h1 id="inventory-title">Sword Inventory</h1>
+    <p>Five identical swords forge a Divine version. Five Divine swords forge a God's Chosen version.</p>
+    <div id="inventory-list"></div>
+    <div class="dialog-actions">
+      <button id="equip-best-button" type="button">Equip Best</button>
+      <button id="inventory-close" type="button">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="upgrade-dialog" aria-labelledby="upgrade-title">
+    <h1 id="upgrade-title">Arctic Upgrade Shrine</h1>
+    <p>Each biome unlocks five levels. Upgrade prices continue rising with progression.</p>
+    <div id="upgrade-list"></div>
+    <button id="upgrade-close" type="button">Close</button>
+  </dialog>
+
+  <dialog id="capacity-dialog" aria-labelledby="capacity-title">
+    <h1 id="capacity-title">Inventory Full</h1>
+    <p id="capacity-message"></p>
+    <div class="dialog-actions">
+      <button id="capacity-upgrade-button" type="button">Upgrade Capacity</button>
+      <button id="capacity-close" type="button">Not Yet</button>
+    </div>
+  </dialog>
+
   <dialog id="victory-dialog" aria-labelledby="victory-title" aria-describedby="victory-summary">
     <div class="victory-icon" aria-hidden="true">⚔</div>
     <p class="victory-label">ADVENTURE COMPLETE</p>
     <h1 id="victory-title">You made it out!</h1>
-    <p>Vorgath the Merciless has fallen. The toll is paid. Town will remember this one.</p>
+    <p>Skaldrath the Frozen Tyrant has fallen. Even the endless winter recoils from your name.</p>
     <p id="victory-summary"></p>
     <button id="restart-button" type="button" autofocus>Start a new adventure</button>
     <p class="restart-note">Start fresh with your starter sword, 100 HP, and 0 gold.</p>

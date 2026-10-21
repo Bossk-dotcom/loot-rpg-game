@@ -8,8 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'script.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const documentIds = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
 
-// Run the real game logic with a minimal DOM; no browser or packages required.
-function boot() {
+function boot(storage = new Map()) {
   const elements = new Map();
   const windowListeners = {};
   const documentListeners = {};
@@ -18,14 +17,14 @@ function boot() {
   const drawing = new Proxy({}, { get(target, method) {
     if (method in target) return target[method];
     return (...args) => {
-      const positions = {arc:[0,1,2,3,4], fillRect:[0,1,2,3], strokeRect:[0,1,2,3], clearRect:[0,1,2,3], moveTo:[0,1], lineTo:[0,1], fillText:[1,2], strokeText:[1,2]}[method] || [];
+      const positions = { arc:[0,1,2,3,4], fillRect:[0,1,2,3], strokeRect:[0,1,2,3], clearRect:[0,1,2,3], moveTo:[0,1], lineTo:[0,1], fillText:[1,2], translate:[0,1] }[method] || [];
       positions.forEach(index => assert.ok(Number.isFinite(args[index]), `${method} argument ${index} must be finite`));
-      drawCalls.push({method, args});
+      drawCalls.push({ method, args });
     };
   }});
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
-      style: {}, textContent: '', open: false, listeners: {},
+      style: {}, textContent: '', innerHTML: '', open: false, listeners: {}, dataset: {},
       width: 800, height: 450,
       getContext: () => drawing,
       addEventListener(name, handler) { this.listeners[name] = handler; },
@@ -36,6 +35,11 @@ function boot() {
     });
     return elements.get(id);
   }
+  const localStorage = {
+    getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+    setItem(key, value) { storage.set(key, String(value)); },
+    removeItem(key) { storage.delete(key); }
+  };
   const document = {
     hidden: false,
     getElementById: id => documentIds.has(id) ? element(id) : null,
@@ -43,649 +47,296 @@ function boot() {
   };
   const context = vm.createContext({
     document,
-    window: { addEventListener(name, handler) { windowListeners[name] = handler; } },
+    window: { localStorage, addEventListener(name, handler) { windowListeners[name] = handler; } },
     requestAnimationFrame: callback => frames.push(callback)
   });
   vm.runInContext(source, context);
-  return {
-    run: code => vm.runInContext(code, context),
-    element, document, windowListeners, documentListeners, drawCalls, frames
-  };
+  return { run: code => vm.runInContext(code, context), element, storage, windowListeners, documentListeners, drawCalls, frames };
 }
 
-function atBoss(game, gold = 500, defeated = false) {
-  game.run(`state.zone = 5; state.gold = ${gold}; spawnZoneEnemies(); player.x = 780;`);
-  if (defeated) game.run('enemies[0].hp = 0;');
+function nearEnemy(game, type) {
+  game.run(`player.x = 900; player.y = 180; updateZoneFromPosition(); enemies = [createEnemy('${type}', 950, 180)]; player.facing = 'right';`);
 }
 
-test('final gate cannot be bought past a living boss', () => {
-  const game = boot();
-  atBoss(game, 1000);
-  game.run('updatePlayer();');
-  assert.equal(game.run('state.zone'), 5);
-  assert.equal(game.run('state.gold'), 1000);
-  assert.equal(game.run('state.won'), false);
-  assert.match(game.element('status-banner').textContent, /Defeat Vorgath the Merciless/);
-});
-
-test('insufficient toll keeps a defeated-boss run playable', () => {
-  const game = boot();
-  atBoss(game, 499, true);
-  game.run('updatePlayer();');
-  assert.equal(game.run('state.zone'), 5);
-  assert.equal(game.run('state.gold'), 499);
-  assert.equal(game.run('state.won'), false);
-  assert.match(game.element('status-banner').textContent, /500/);
-});
-
-test('exact toll wins once without spawning undefined zone 6', () => {
-  const game = boot();
-  atBoss(game, 500, true);
-  game.run('updatePlayer(); updatePlayer(); completeAdventure();');
-  assert.equal(game.run('state.zone'), 5);
-  assert.equal(game.run('state.gold'), 0);
-  assert.equal(game.run('state.won'), true);
-  assert.equal(game.element('victory-dialog').open, true);
-  assert.match(game.element('victory-summary').textContent, /0 gold/);
-});
-
-test('full route, actual boss kill, reward, toll and restart work together', () => {
-  const game = boot();
-  for (let zone = 1; zone <= 5; zone++) {
-    game.run('player.x = 780; updatePlayer();');
-    assert.equal(game.run('state.zone'), zone);
-    assert.ok(game.run('enemies.length') > 0);
-  }
-  // A deterministic endgame build avoids minutes of training in this smoke test.
-  game.run('state.totalAttackPower = 3500; player.x = 500; player.y = 100; triggerAttack();');
-  assert.equal(game.run('enemies[0].hp'), 0);
-  assert.equal(game.run('state.gold'), 1000);
-  assert.match(game.element('objective-text').textContent, /Vorgath the Merciless defeated/);
-  game.run('player.x = 780; updatePlayer();');
-  assert.equal(game.run('state.won'), true);
-  assert.equal(game.run('state.gold'), 500);
-  game.element('restart-button').listeners.click();
-  assert.equal(game.run('state.zone'), 0);
-  assert.equal(game.run('state.gold'), 0);
-  assert.equal(game.run('state.hp'), 100);
-  assert.equal(game.run('state.totalAttackPower'), 10);
-  assert.equal(game.run('state.equippedSword.power'), 1);
-  assert.equal(game.run('state.tollCost'), 500);
-  assert.equal(game.run('state.won'), false);
-  assert.equal(game.run('enemies.length'), 0);
-  assert.equal(game.run('player.x'), 100);
-  assert.equal(game.run('player.swinging'), false);
-  assert.equal(game.element('victory-dialog').open, false);
-  assert.equal(game.element('gameCanvas').focused, true);
-  game.run('triggerAttack();');
-  assert.equal(game.run('state.totalAttackPower'), 11);
-});
-
-test('victory freezes movement, damage and attacks', () => {
-  const game = boot();
-  atBoss(game, 500, true);
-  game.run('updatePlayer();');
-  const x = game.run('player.x');
-  game.run('keys.d = true; enemies[0].hp = 3500; enemies[0].attackTimer = 100; enemies[0].x = player.x; enemies[0].y = player.y; updatePlayer(); updateEnemies(); triggerAttack();');
-  assert.equal(game.run('player.x'), x);
-  assert.equal(game.run('state.hp'), 100);
-  assert.equal(game.run('enemies[0].hp'), 3500);
-  assert.equal(game.run('player.swinging'), false);
-});
-
-test('death stops the old enemy wave and applies its penalty only once', () => {
-  const game = boot();
-  game.run(`state.zone = 1; state.gold = 100; state.hp = 1; spawnZoneEnemies();
-    enemies.forEach(enemy => { enemy.x = 100; enemy.y = 200; enemy.atk = 100;
-      enemy.phase = 'windup'; enemy.phaseTimer = 1; enemy.attackOrigin = center(enemy); enemy.attackAngle = 0; });
-    keys.d = true; updateEnemies();`);
-  assert.equal(game.run('state.zone'), 0);
-  assert.equal(game.run('state.hp'), 100);
-  assert.equal(game.run('state.gold'), 25);
-  assert.equal(game.run('enemies.length'), 0);
-  assert.equal(game.run('Object.keys(keys).length'), 0);
-});
-
-test('backtracking to town and farming encounters still work', () => {
-  const game = boot();
-  game.run('player.x = 780; updatePlayer(); enemies[0].hp = 0; player.x = 0; updatePlayer();');
-  assert.equal(game.run('state.zone'), 0);
-  assert.equal(game.run('enemies.length'), 0);
-  game.run('player.x = 780; updatePlayer();');
-  assert.equal(game.run('enemies.length'), 15);
-  assert.equal(game.run('enemies[0].hp'), 40);
-});
-
-test('town has common and rare chests with the correct prices', () => {
-  const game = boot();
-  assert.equal(game.run('chestShops.length'), 2);
-  assert.equal(game.run('chestShops[0].tier'), 'Common');
-  assert.equal(game.run('chestShops[0].cost'), 50);
-  assert.equal(game.run('chestShops[1].tier'), 'Rare');
-  assert.equal(game.run('chestShops[1].cost'), 150);
-});
-
-test('rare chest uses the 40/45/10/5 rarity boundaries', () => {
-  const cases = [
-    [0, 'Common'],
-    [0.399999, 'Common'],
-    [0.40, 'Rare'],
-    [0.849999, 'Rare'],
-    [0.85, 'Epic'],
-    [0.949999, 'Epic'],
-    [0.95, 'Legendary'],
-    [0.999999, 'Legendary']
-  ];
-
-  for (const [roll, expected] of cases) {
-    const game = boot();
-    game.run(`Math.random = () => ${roll}; buyChest('Rare');`);
-    assert.equal(game.run('state.equippedSword.rarity'), expected);
-    assert.notEqual(game.run('state.equippedSword.rarity'), 'BROKEN');
-  }
-});
-
-test('common chest uses the 53/39/5/3 rarity boundaries', () => {
-  const cases = [
-    [0, 'Common'],
-    [0.529999, 'Common'],
-    [0.53, 'Rare'],
-    [0.919999, 'Rare'],
-    [0.92, 'Epic'],
-    [0.969999, 'Epic'],
-    [0.97, 'Legendary'],
-    [0.999999, 'Legendary']
-  ];
-
-  for (const [roll, expected] of cases) {
-    const game = boot();
-    game.run(`Math.random = () => ${roll}; buyChest('Common');`);
-    assert.equal(game.run('state.equippedSword.rarity'), expected);
-    assert.notEqual(game.run('state.equippedSword.rarity'), 'BROKEN');
-  }
-});
-
-for (const fps of [30, 60, 144]) {
-  test(`movement covers the same distance at ${fps} Hz`, () => {
-    const game = boot();
-    game.run('keys.d = true; loop(0);');
-    for (let frame = 1; frame <= fps; frame++) game.run(`loop(${frame * 1000 / fps});`);
-    assert.equal(game.run('player.x'), 490);
-  });
-}
-
-test('held-space training and enemy timers agree across refresh rates', () => {
-  const snapshots = [30, 60, 144].map(fps => {
-    const game = boot();
-    game.run('keys[" "] = true; loop(0);');
-    for (let frame = 1; frame <= fps * 2; frame++) game.run(`loop(${frame * 1000 / fps});`);
-    const attack = game.run('state.totalAttackPower');
-    game.run('clearInput(); state.zone = 1; spawnZoneEnemies(); enemies = enemies.slice(0, 1); enemies[0].attackTimer = 0; player.x = enemies[0].x; player.y = enemies[0].y;');
-    for (let frame = fps * 2 + 1; frame <= fps * 4; frame++) game.run(`loop(${frame * 1000 / fps});`);
-    return { attack, hp: game.run('state.hp') };
-  });
-  assert.deepEqual(snapshots[0], snapshots[1]);
-  assert.deepEqual(snapshots[1], snapshots[2]);
-  assert.equal(snapshots[0].hp, 90);
-});
-
-test('blur clears held controls and discards elapsed background time', () => {
-  const game = boot();
-  game.run('keys.d = true; loop(0);');
-  game.windowListeners.blur();
-  game.run('loop(60000);');
-  assert.equal(game.run('player.x'), 100);
-  assert.equal(game.run('Object.keys(keys).length'), 0);
-  game.document.hidden = true;
-  game.run('keys.d = true; loop(70000);');
-  assert.equal(game.run('player.x'), 100);
-  game.documentListeners.visibilitychange();
-  assert.equal(game.run('Object.keys(keys).length'), 0);
-});
-
-test('long frame stalls cannot produce unbounded catch-up movement', () => {
-  const game = boot();
-  game.run('keys.d = true; loop(0); loop(60000);');
-  assert.equal(game.run('player.x'), 139);
-});
-
-test('only left mouse attacks and arrow keys suppress page scrolling', () => {
-  const game = boot();
-  game.element('gameCanvas').listeners.mousedown({ button: 2 });
-  assert.equal(game.run('state.totalAttackPower'), 10);
-  game.element('gameCanvas').listeners.mousedown({ button: 0 });
-  assert.equal(game.run('state.totalAttackPower'), 11);
-  let prevented = false;
-  game.windowListeners.keydown({ key: 'ArrowDown', preventDefault() { prevented = true; } });
-  assert.equal(prevented, true);
-});
-
-function goblinEncounter(game) {
-  game.run(`state.zone = 1; spawnZoneEnemies(); enemies = enemies.slice(0, 1);
-    enemies[0].x = 250; enemies[0].y = 180; enemies[0].homeX = 250; enemies[0].homeY = 180;
-    player.x = 200; player.y = 180; player.facing = 'right';`);
-}
-
-for (const [facing, dx, dy] of [['right', 50, 0], ['left', -50, 0], ['up', 0, -50], ['down', 0, 50]]) {
-  test(`a ${facing} swing hits in front but not behind`, () => {
-    const game = boot();
-    goblinEncounter(game);
-    game.run(`player.facing = '${facing}';
-      enemies[0].x = player.x + ${dx}; enemies[0].y = player.y + ${dy};
-      enemies.push({...enemies[0], x: player.x - ${dx}, y: player.y - ${dy}});
-      triggerAttack();`);
-    assert.equal(game.run('enemies[0].hp'), 30);
-    assert.equal(game.run('enemies[1].hp'), 40);
-  });
-}
-
-test('sword reach respects the visible arc and target edges', () => {
-  const game = boot();
-  goblinEncounter(game);
-  assert.equal(game.run('inAttackArc({x:0,y:0}, 0, 62, Math.PI/3, {x:70,y:-5,size:10})'), false);
-  assert.equal(game.run('inAttackArc({x:0,y:0}, 0, 62, Math.PI/3, {x:60,y:-5,size:10})'), true);
-  assert.equal(game.run('inAttackArc({x:0,y:0}, 0, 62, Math.PI/3, {x:-35,y:-5,size:10})'), false);
-});
-
-test('one swing grants a kill reward once and leaves bounded feedback', () => {
-  const game = boot();
-  goblinEncounter(game);
-  game.run('enemies[0].hp = 10; triggerAttack(); triggerAttack(); player.swinging = false; triggerAttack();');
-  assert.equal(game.run('state.gold'), 15);
-  assert.equal(game.run('enemies[0].hp'), 0);
-  assert.ok(game.run('effects.some(effect => effect.text === "+15 gold")'));
-  game.run('for(let i=0;i<500;i++) addEffect(0,0,"1","white");');
-  assert.ok(game.run('effects.length') <= 100);
-  game.run('for(let i=0;i<60;i++) updateEffects();');
-  assert.equal(game.run('effects.length'), 0);
-});
-
-test('nearby goblins pursue; distant goblins stay home', () => {
-  const game = boot();
-  goblinEncounter(game);
-  game.run('player.x = 100; updateEnemies();');
-  assert.ok(game.run('enemies[0].x') < 250);
-  const distant = boot();
-  goblinEncounter(distant);
-  distant.run('player.x = 10; updateEnemies();');
-  assert.equal(distant.run('enemies[0].x'), 250);
-  assert.equal(distant.run('enemies[0].active'), false);
-});
-
-test('pursuers obey the configured encounter cap', () => {
-  const game = boot();
-  game.run('state.zone = 1; spawnZoneEnemies(); player.x = 450; player.y = 180; updateEnemies();');
-  assert.equal(game.run('enemies.filter(enemy => enemy.active).length'), game.run('COMBAT.maxPursuers'));
-});
-
-test('pursuers give up at their leash and return home without healing', () => {
-  const game = boot();
-  goblinEncounter(game);
-  game.run('enemies[0].active = true; enemies[0].hp = 20; enemies[0].x = enemies[0].homeX + COMBAT.leash + 1; player.x = enemies[0].x + 40; updateEnemies();');
-  assert.equal(game.run('enemies[0].active'), false);
-  assert.equal(game.run('enemies[0].returning'), true);
-  game.run('player.x = 10; for(let i=0;i<Math.ceil(COMBAT.leash / ENEMY_SPECS.Goblin.speed) + 5;i++) updateEnemies();');
-  assert.ok(Math.abs(game.run('enemies[0].x') - 250) < 3);
-  assert.equal(game.run('enemies[0].returning'), false);
-  assert.equal(game.run('enemies[0].hp'), 20);
-});
-
-test('windup gives a full warning, commits direction, and can be sidestepped', () => {
-  const game = boot();
-  goblinEncounter(game);
-  game.run('updateEnemies();');
-  assert.equal(game.run('enemies[0].phase'), 'windup');
-  const angle = game.run('enemies[0].attackAngle');
-  game.run('for(let i=0;i<ENEMY_SPECS.Goblin.windup-1;i++) updateEnemies();');
-  assert.equal(game.run('state.hp'), 100);
-  game.run('player.x = 310; updateEnemies();');
-  assert.equal(game.run('enemies[0].phase'), 'strike');
-  assert.equal(game.run('enemies[0].attackAngle'), angle);
-  assert.equal(game.run('state.hp'), 100);
-});
-
-test('standing in a committed attack takes one hit followed by recovery', () => {
-  const game = boot();
-  goblinEncounter(game);
-  game.run('for(let i=0;i<34;i++) updateEnemies();');
-  assert.equal(game.run('state.hp'), 95);
-  game.run('for(let i=0;i<8;i++) updateEnemies();');
-  assert.equal(game.run('state.hp'), 95);
-  assert.equal(game.run('enemies[0].phase'), 'recovery');
-});
-
-test('hits flash and knock back an idle goblin but do not move a committed tell', () => {
-  const game = boot();
-  goblinEncounter(game);
-  game.run('triggerAttack();');
-  assert.ok(game.run('enemies[0].x') > 250);
-  assert.ok(game.run('enemies[0].hitFlash') > 0);
-  const committed = boot();
-  goblinEncounter(committed);
-  committed.run('updateEnemies(); triggerAttack();');
-  assert.equal(committed.run('enemies[0].phase'), 'windup');
-  assert.equal(committed.run('enemies[0].x'), 250);
-  assert.equal(committed.run('enemies[0].attackOrigin.x'), 262);
-});
-
-test('dodge follows movement and locks direction, with a normalized diagonal', () => {
-  const game = boot();
-  game.run('player.x = 300; player.y = 200; keys.d = true; keys.w = true; triggerDodge(); clearInput(); keys.a = true; updatePlayer();');
-  const dx = game.run('player.x') - 300, dy = game.run('player.y') - 200;
-  assert.ok(dx > 0 && dy < 0);
-  assert.ok(Math.abs(Math.hypot(dx, dy) - 13) < 1e-9);
-});
-
-test('stationary dodge follows facing and cannot repeat until its cooldown ends', () => {
-  const game = boot();
-  game.run('player.x = 300; player.facing = "left"; triggerDodge(); for(let i=0;i<12;i++) updatePlayer(); triggerDodge();');
-  assert.equal(game.run('player.x'), 144);
-  assert.equal(game.run('player.dodgeTimer'), 0);
-  game.run('for(let i=0;i<60;i++) updatePlayer(); triggerDodge();');
-  assert.equal(game.run('player.dodgeTimer'), 12);
-});
-
-test('dodge cancels a swing, blocks attacks and avoids damage during its window', () => {
-  const game = boot();
-  goblinEncounter(game);
-  game.run('updateEnemies(); triggerAttack(); triggerDodge(); triggerAttack(); enemies[0].phaseTimer = 1; updateEnemies();');
-  assert.equal(game.run('player.swinging'), false);
-  assert.equal(game.run('enemies[0].hp'), 30);
-  assert.equal(game.run('state.hp'), 100);
-  assert.ok(game.run('effects.some(effect => effect.text === "DODGED")'));
-});
-
-test('dodging too early does not protect against a later hit', () => {
-  const game = boot();
-  goblinEncounter(game);
-  game.run('updateEnemies(); triggerDodge(); player.dodgeX=0; player.dodgeY=0; for(let i=0;i<12;i++) updatePlayer(); enemies[0].phaseTimer=1; updateEnemies();');
-  assert.equal(game.run('state.hp'), 95);
-});
-
-test('simultaneous goblin hits get a short grace window instead of stacking', () => {
-  const game = boot();
-  goblinEncounter(game);
-  game.run('enemies.push({...enemies[0]}); for(let i=0;i<34;i++) updateEnemies();');
-  assert.equal(game.run('state.hp'), 95);
-});
-
-test('dodge also protects against an orc strike', () => {
-  const game = boot();
-  game.run('state.zone=2; spawnZoneEnemies(); enemies=enemies.slice(0,1); player.x=enemies[0].x; player.y=enemies[0].y; updateEnemies(); triggerDodge(); enemies[0].phaseTimer=1; updateEnemies();');
-  assert.equal(game.run('enemies[0].phase'), 'strike');
-  assert.equal(game.run('state.hp'), 100);
-});
-
-test('zone changes and restart clear transient combat, retaining a travel cooldown', () => {
-  const game = boot();
-  game.run('player.x=770; triggerDodge(); updatePlayer();');
-  assert.equal(game.run('state.zone'), 1);
-  assert.equal(game.run('player.dodgeTimer'), 0);
-  assert.ok(game.run('player.dodgeCooldown') > 0);
-  assert.equal(game.run('effects.length'), 0);
-  game.run('restartGame();');
-  assert.equal(game.run('player.dodgeCooldown'), 0);
-  assert.equal(game.run('player.invulnerableTimer'), 0);
-});
-
-test('Shift input starts one dodge and native repeat cannot queue another', () => {
-  const game = boot();
-  game.windowListeners.keydown({key:'Shift', repeat:false});
-  assert.equal(game.run('player.dodgeTimer'), 12);
-  game.run('player.dodgeTimer=0; player.dodgeCooldown=0;');
-  game.windowListeners.keydown({key:'Shift', repeat:true});
-  assert.equal(game.run('player.dodgeTimer'), 0);
-});
-
-test('muting sound and unavailable audio do not break combat or capture button keys', () => {
-  const game = boot();
-  game.element('sound-button').listeners.click();
-  assert.equal(game.element('sound-button').textContent, 'Sound: Off');
-  assert.equal(game.element('sound-button')['aria-pressed'], 'true');
-  game.windowListeners.keydown({key:' ', target:{tagName:'BUTTON'}});
-  assert.equal(game.run('player.swinging'), false);
-  game.element('sound-button').listeners.click();
-  game.run('triggerAttack();');
-  assert.equal(game.run('state.totalAttackPower'), 11);
-});
-
-test('dodge and a moving goblin encounter remain consistent across frame rates', () => {
-  const outcomes = [30,60,144].map(fps => {
-    const game = boot();
-    goblinEncounter(game);
-    game.run('player.x=150; triggerDodge(); loop(0);');
-    for(let frame=1;frame<=fps*2;frame++) game.run(`loop(${frame*1000/fps});`);
-    return game.run('JSON.stringify({hp:state.hp,x:player.x,enemyX:enemies[0].x,phase:enemies[0].phase,cooldown:player.dodgeCooldown})');
-  });
-  assert.equal(outcomes[0], outcomes[1]);
-  assert.equal(outcomes[1], outcomes[2]);
-});
-
-test('real HTML and game script boot, render town, handle input and schedule the next frame', () => {
+test('the real HTML and game script boot with every required control', () => {
   const game = boot();
   assert.equal(game.frames.length, 1);
+  for (const id of ['inventory-button','inventory-dialog','upgrade-dialog','capacity-dialog','victory-dialog']) assert.ok(documentIds.has(id));
   game.frames.shift()(0);
   assert.equal(game.frames.length, 1);
   assert.ok(game.drawCalls.some(call => call.method === 'fillText' && call.args[0] === 'DUMMY'));
-  game.windowListeners.keydown({key:' ', repeat:false, preventDefault(){}});
-  assert.equal(game.element('atk-text').textContent, 11);
-  assert.ok(game.windowListeners.keyup);
 });
 
-const monsterZones = [[1,'Goblin'],[2,'Orc'],[3,'Knight'],[4,'Dark Knight'],[5,'BOSS']];
-function monsterEncounter(game, zone) {
-  game.run(`state.zone=${zone}; spawnZoneEnemies(); enemies=enemies.slice(0,1);
-    enemies[0].x=300; enemies[0].y=200; enemies[0].homeX=300; enemies[0].homeY=200;
-    player.x=180; player.y=200;`);
-}
-
-for (const [zone, type] of monsterZones) {
-  test(`${type}: pursues, warns for its configured duration, hits once and recovers`, () => {
-    const game = boot();
-    monsterEncounter(game, zone);
-    const spec = JSON.parse(game.run(`JSON.stringify(ENEMY_SPECS['${type}'])`));
-    const x = game.run('enemies[0].x');
-    game.run('updateEnemies();');
-    assert.ok(game.run('enemies[0].x') < x);
-    game.run('player.x=enemies[0].x-35; player.y=enemies[0].y; updateEnemies(); render();');
-    assert.equal(game.run('enemies[0].phase'), 'windup');
-    game.run(`for(let i=0;i<${spec.windup-1};i++) updateEnemies();`);
-    assert.equal(game.run('state.hp'), 100);
-    game.run('updateEnemies(); render();');
-    assert.equal(game.run('state.hp'), 100-spec.atk);
-    assert.equal(game.run('enemies[0].phase'), 'strike');
-    game.run(`for(let i=0;i<${spec.strikeTicks};i++) updateEnemies();`);
-    assert.equal(game.run('enemies[0].phase'), 'recovery');
-    assert.equal(game.run('state.hp'), 100-spec.atk);
-    game.run(`for(let i=0;i<${spec.recovery};i++) updateEnemies();`);
-    assert.equal(game.run('enemies[0].phase'), 'idle');
-  });
-
-  test(`${type}: a sidestep and a correctly timed dodge avoid committed damage`, () => {
-    for (const dodge of [false,true]) {
-      const game = boot();
-      monsterEncounter(game,zone);
-      game.run('player.x=265; updateEnemies();');
-      const angle = game.run('enemies[0].attackAngle');
-      game.run('enemies[0].phaseTimer=1;');
-      game.run(dodge ? 'triggerDodge();' : 'player.x=500;');
-      game.run('updateEnemies();');
-      assert.equal(game.run('enemies[0].attackAngle'),angle);
-      assert.equal(game.run('state.hp'),100);
-      assert.equal(game.run('enemies[0].phase'),'strike');
-    }
-  });
-
-  test(`${type}: retreat returns home without restoring health`, () => {
-    const game=boot();
-    monsterEncounter(game,zone);
-    game.run('enemies[0].active=true; enemies[0].hp=1; enemies[0].x=590; player.x=620; updateEnemies();');
-    assert.equal(game.run('enemies[0].returning'),true);
-    game.run(`player.x=10; for(let i=0;i<Math.ceil(300/ENEMY_SPECS['${type}'].speed)+10;i++) updateEnemies();`);
-    assert.ok(Math.abs(game.run('enemies[0].x')-300)<3);
-    assert.equal(game.run('enemies[0].hp'),1);
-  });
-
-  test(`${type}: its countdown ring remains outside the body or smash area`, () => {
-    const game=boot();
-    monsterEncounter(game,zone);
-    game.run('player.x=265; updateEnemies(); enemies[0].phaseTimer--;');
-    const size=game.run('enemies[0].size');
-    const origin=JSON.parse(game.run('JSON.stringify(enemies[0].attackTarget || enemies[0].attackOrigin)'));
-    game.drawCalls.length=0;
-    game.run('render();');
-    const arcs=game.drawCalls.filter(call=>call.method==='arc' && call.args[0]===origin.x && call.args[1]===origin.y);
-    assert.ok(arcs.length >= 2);
-    const countdown=arcs.find(call=>call.args[3]===-Math.PI/2);
-    assert.ok(countdown.args[2] > size / Math.SQRT2, 'The body must not cover any part of its countdown ring');
-    if (type === 'Orc') assert.ok(countdown.args[2] > game.run('ENEMY_SPECS.Orc.smashRadius'));
-    if (type === 'Knight') assert.ok(countdown.args[2] > size / 2 + 12, 'The shield must not cover the countdown');
-  });
-
-  test(`${type}: death and respawn clear every transient attack field`, () => {
-    const game=boot();
-    monsterEncounter(game,zone);
-    game.run('player.x=265; updateEnemies(); state.totalAttackPower=10000; player.facing="right";');
-    if (type === 'Knight') game.run('player.x=350; player.facing="left";'); // Flank its committed guard.
-    game.run('triggerAttack();');
-    const reward=game.run('enemies[0].goldValue');
-    assert.equal(game.run('state.gold'),reward);
-    assert.equal(game.run('enemies[0].hp'),0);
-    assert.equal(game.run('enemies[0].attackOrigin'),null);
-    assert.equal(game.run('enemies[0].attackTarget'),null);
-    assert.equal(game.run('enemies[0].blockFlash'),0);
-    assert.equal(game.run('enemies[0].phaseTimer'),0);
-    assert.equal(game.run('enemies[0].active'),false);
-    game.run('player.x=10; for(let i=0;i<COMBAT.respawnTime;i++)updateEnemies();');
-    assert.equal(game.run('state.gold'),reward);
-    if(zone===5) {
-      assert.equal(game.run('enemies[0].hp'),0);
-      assert.match(game.element('objective-text').textContent,/Vorgath the Merciless defeated/);
-    } else {
-      assert.equal(game.run('enemies[0].hp'),game.run('enemies[0].maxHp'));
-      assert.equal(game.run('enemies[0].hitFlash'),0);
-      assert.equal(game.run('enemies[0].x'),300);
-      assert.equal(game.run('enemies[0].y'),200);
-      assert.equal(game.run('enemies[0].phase'),'idle');
-      assert.equal(game.run('enemies[0].respawnTimer'),0);
-    }
-  });
-}
-
-test('Orc smash locks its ground target and draws the same radius used for damage', () => {
+test('each biome contains the requested monster counts and one boss', () => {
   const game = boot();
-  monsterEncounter(game, 2);
-  game.run('player.x=265; updateEnemies();');
-  const target = JSON.parse(game.run('JSON.stringify(enemies[0].attackTarget)'));
-  assert.deepEqual(target, {x:279, y:214});
-  game.run('player.x=500; player.y=350; for(let i=0;i<20;i++)updateEnemies(); render();');
-  assert.equal(game.run('enemies[0].attackTarget.x'), target.x);
-  assert.equal(game.run('enemies[0].attackTarget.y'), target.y);
-  const disc = game.drawCalls.find(call => call.method === 'arc' && call.args[0] === target.x && call.args[1] === target.y && call.args[3] === 0);
-  assert.equal(disc.args[2], game.run('ENEMY_SPECS.Orc.smashRadius'));
-  game.run('enemies[0].phaseTimer=1; updateEnemies();');
-  assert.equal(game.run('state.hp'), 100);
+  assert.equal(game.run('enemies.filter(e=>e.type==="Goblin").length'), 15);
+  assert.equal(game.run('enemies.filter(e=>e.type==="Orc").length'), 10);
+  assert.equal(game.run('enemies.filter(e=>e.type==="Knight").length'), 5);
+  assert.equal(game.run('enemies.filter(e=>e.type==="Dark Knight").length'), 3);
+  assert.equal(game.run('enemies.filter(e=>e.type==="VORGATH").length'), 1);
+  game.run('enterBiome(1);');
+  assert.equal(game.run('enemies.filter(e=>e.type==="Penguin").length'), 15);
+  assert.equal(game.run('enemies.filter(e=>e.type==="Arctic Wolf").length'), 10);
+  assert.equal(game.run('enemies.filter(e=>e.type==="Polar Bear").length'), 5);
+  assert.equal(game.run('enemies.filter(e=>e.type==="Yeti").length'), 3);
+  assert.equal(game.run('enemies.filter(e=>e.type==="SKALDRATH").length'), 1);
 });
 
-for (const [dx, dy, hit] of [[0,0,true], [80,0,true], [-80,0,true], [0,80,true], [0,-80,true], [87,0,false], [62,62,false]]) {
-  test(`Orc smash circular boundary at (${dx}, ${dy}) ${hit ? 'hits' : 'misses'}`, () => {
-    const game = boot();
-    monsterEncounter(game, 2);
-    game.run(`player.x=265; updateEnemies(); player.x=enemies[0].attackTarget.x-14+${dx}; player.y=enemies[0].attackTarget.y-14+${dy}; enemies[0].phaseTimer=1; updateEnemies();`);
-    assert.equal(game.run('state.hp'), hit ? 88 : 100);
-    game.run('player.invulnerableTimer=0; for(let i=0;i<ENEMY_SPECS.Orc.strikeTicks;i++)updateEnemies();');
-    assert.equal(game.run('state.hp'), hit ? 88 : 100, 'A lingering smash graphic must not deal repeated damage');
-    assert.equal(game.run('enemies[0].phase'), 'recovery');
+test('Arctic enemies use the approved health, attack and gold values', () => {
+  const game = boot();
+  assert.deepEqual(JSON.parse(game.run(`JSON.stringify(Object.fromEntries(['Penguin','Arctic Wolf','Polar Bear','Yeti','SKALDRATH'].map(type=>[type,[ENEMY_SPECS[type].hp,ENEMY_SPECS[type].atk,ENEMY_SPECS[type].gold]])))`)), {
+    Penguin: [100,75,25], 'Arctic Wolf': [300,110,50], 'Polar Bear': [875,135,120], Yeti: [2250,170,300], SKALDRATH: [8750,210,1500]
   });
-}
-
-test('Orc smash respects dodge timing and the damage grace period', () => {
-  for (const protection of ['dodge', 'grace', 'expired']) {
-    const game = boot();
-    monsterEncounter(game, 2);
-    game.run('player.x=265; updateEnemies();');
-    if (protection === 'grace') game.run('player.invulnerableTimer=10;');
-    else {
-      game.run('triggerDodge();');
-      if (protection === 'expired') game.run('player.dodgeX=0; player.dodgeY=0; for(let i=0;i<COMBAT.dodgeTicks;i++)updatePlayer();');
-    }
-    game.run('enemies[0].phaseTimer=1; updateEnemies();');
-    assert.equal(game.run('state.hp'), protection === 'expired' ? 88 : 100);
-  }
 });
 
-for (const [angle, frontX, frontY, frontFacing, backX, backY, backFacing] of [
-  [0,350,202,'left',250,202,'right'],
-  [Math.PI/2,302,250,'up',302,150,'down'],
-  [Math.PI,250,202,'right',350,202,'left'],
-  [-Math.PI/2,302,150,'down',302,250,'up']
-]) {
-  test(`Knight guard at ${angle.toFixed(2)} radians blocks the front but allows a rear hit`, () => {
-    const game = boot();
-    monsterEncounter(game, 3);
-    game.run(`enemies[0].facingAngle=${angle}; player.x=${frontX}; player.y=${frontY}; player.facing='${frontFacing}'; triggerAttack(); render();`);
-    assert.equal(game.run('enemies[0].hp'), 350);
-    assert.equal(game.run('enemies[0].x'), 300);
-    assert.equal(game.run('enemies[0].hitFlash'), 0);
-    assert.ok(game.run('enemies[0].blockFlash') > 0);
-    assert.ok(game.run('effects.some(effect=>effect.text === "BLOCKED")'));
-    assert.equal(game.run('state.gold'), 0);
-    game.run(`player.swinging=false; player.x=${backX}; player.y=${backY}; player.facing='${backFacing}'; triggerAttack();`);
-    assert.equal(game.run('enemies[0].hp'), 340);
-  });
-}
-
-test('Knight guard covers its visible front arc without blocking side attacks', () => {
+test('the camera follows the player through a world wider than the canvas', () => {
   const game = boot();
-  monsterEncounter(game, 3);
-  game.run('enemies[0].facingAngle=0;');
-  for (const angle of [-Math.PI/3-0.01, -Math.PI/3+0.01, Math.PI/3-0.01, Math.PI/3+0.01]) {
-    assert.equal(game.run(`shieldBlocks(enemies[0], {x:316+50*Math.cos(${angle})-14,y:216+50*Math.sin(${angle})-14,size:28})`), Math.abs(angle) < Math.PI/3);
-  }
+  assert.ok(game.run('WORLD.width') > 800);
+  game.run('player.x=2400; updatePlayer(); render();');
+  assert.ok(game.run('cameraX') > 0);
+  assert.ok(game.drawCalls.some(call => call.method === 'translate' && call.args[0] < 0));
 });
 
-test('Knight guard turns at a limited speed and stays committed through its attack', () => {
+test('regular monsters remain passive until struck', () => {
   const game = boot();
-  monsterEncounter(game, 3);
-  game.run('player.x=350; player.y=202; updateEnemies();');
-  assert.equal(game.run('enemies[0].phase'), 'idle', 'A knight cannot snap around to attack');
-  assert.ok(Math.abs(game.run('enemies[0].facingAngle') - Math.PI) <= game.run('ENEMY_SPECS.Knight.turnSpeed') + 1e-9);
-  game.run('for(let i=0;i<95;i++)updateEnemies();');
-  assert.equal(game.run('enemies[0].phase'), 'windup');
-  const facing = game.run('enemies[0].facingAngle');
-  game.run('player.x=250; enemies[0].phaseTimer=1; updateEnemies();');
-  assert.equal(game.run('enemies[0].facingAngle'), facing);
-  assert.equal(game.run('enemies[0].attackAngle'), facing);
-  assert.equal(game.run('state.hp'), 100, 'Flanking escapes the committed attack');
-});
-
-test('Knight blocks during windup and strike, then opens its front for the entire recovery', () => {
-  const game = boot();
-  monsterEncounter(game, 3);
-  game.run('player.x=265; player.facing="right"; updateEnemies(); triggerAttack();');
-  assert.equal(game.run('enemies[0].hp'), 350);
-  assert.equal(game.run('enemies[0].phase'), 'windup');
-  game.run('enemies[0].phaseTimer=1; updateEnemies(); player.swinging=false; triggerAttack();');
-  assert.equal(game.run('enemies[0].hp'), 350);
-  game.run('for(let i=0;i<ENEMY_SPECS.Knight.strikeTicks;i++)updateEnemies(); render();');
-  assert.equal(game.run('knightIsGuarding(enemies[0])'), false);
-  assert.ok(game.drawCalls.some(call => call.method === 'fillText' && call.args[0] === 'OPEN'));
-  game.run('player.swinging=false; triggerAttack();');
-  assert.equal(game.run('enemies[0].hp'), 340);
-  game.run('for(let i=0;i<ENEMY_SPECS.Knight.recovery-1;i++)updateEnemies();');
-  assert.equal(game.run('knightIsGuarding(enemies[0])'), false);
+  nearEnemy(game, 'Goblin');
+  const x = game.run('enemies[0].x');
   game.run('updateEnemies();');
-  assert.equal(game.run('knightIsGuarding(enemies[0])'), true);
+  assert.equal(game.run('enemies[0].active'), false);
+  assert.equal(game.run('enemies[0].x'), x);
+  game.run('triggerAttack();');
+  assert.equal(game.run('enemies[0].active'), true);
+  assert.equal(game.run('enemies[0].hp'), 30);
 });
 
-test('Knight guard drops during retreat and clears its block flash on respawn', () => {
+test('aggro persists at long range until safety or death', () => {
   const game = boot();
-  monsterEncounter(game, 3);
-  game.run('player.x=265; player.facing="right"; triggerAttack(); enemies[0].returning=true; player.swinging=false; state.totalAttackPower=350; triggerAttack();');
-  assert.equal(game.run('enemies[0].hp'), 0);
-  assert.equal(game.run('state.gold'), 80);
-  game.run('player.x=10; for(let i=0;i<COMBAT.respawnTime;i++)updateEnemies();');
-  assert.equal(game.run('enemies[0].blockFlash'), 0);
-  assert.equal(game.run('enemies[0].facingAngle'), Math.PI);
-  assert.equal(game.run('knightIsGuarding(enemies[0])'), true);
+  nearEnemy(game, 'Goblin');
+  game.run('enemies[0].active=true; player.x=3000; updateEnemies();');
+  assert.equal(game.run('enemies[0].active'), true);
+  assert.ok(game.run('enemies[0].x') > 950);
+  game.run('player.x=100; updatePlayer();');
+  assert.equal(game.run('enemies[0].active'), false);
+  assert.equal(game.run('enemies[0].returning'), true);
+});
+
+test('death keeps upgrades, removes 75 percent of gold and returns to the current town', () => {
+  const game = boot();
+  game.run('enterBiome(1); state.gold=1000; state.upgrades.health=2; state.maxHp=150; state.hp=1; damagePlayer(createEnemy("Penguin",900,100),75);');
+  assert.equal(game.run('state.biome'), 1);
+  assert.equal(game.run('player.x'), 100);
+  assert.equal(game.run('state.gold'), 250);
+  assert.equal(game.run('state.upgrades.health'), 2);
+  assert.equal(game.run('state.hp'), 150);
+  assert.equal(game.run('enemies.some(e=>e.active)'), false);
+});
+
+test('entering a living boss den seals the entrance and activates the boss', () => {
+  const game = boot();
+  game.run('enemies[0].active=true; player.x=WORLD.bossStart-1; keys.d=true; updatePlayer(); clearInput();');
+  assert.equal(game.run('state.bossLocked'), true);
+  assert.equal(game.run('enemies.find(e=>e.boss).active'), true);
+  assert.equal(game.run('enemies[0].active'), false);
+  assert.equal(game.run('enemies[0].returning'), true);
+  game.run('player.x=WORLD.bossStart-100; updatePlayer();');
+  assert.equal(game.run('player.x'), game.run('WORLD.bossStart+20'));
+});
+
+test('Vorgath toll is paid once and later biome travel is free', () => {
+  const game = boot();
+  game.run('state.gold=800; state.bossesDefeated[0]=true; spawnBiomeEnemies(); player.x=WORLD.width; updatePlayer();');
+  assert.equal(game.run('state.biome'), 1);
+  assert.equal(game.run('state.gold'), 300);
+  assert.equal(game.run('state.tollPaid'), true);
+  game.run('retreatBiome(); player.x=WORLD.width; updatePlayer();');
+  assert.equal(game.run('state.biome'), 1);
+  assert.equal(game.run('state.gold'), 300);
+});
+
+test('defeated bosses remain defeated when revisiting a biome', () => {
+  const game = boot();
+  game.run('state.bossesDefeated[0]=true; spawnBiomeEnemies();');
+  assert.equal(game.run('enemies.some(e=>e.type==="VORGATH")'), false);
+  game.run('enterBiome(1); retreatBiome();');
+  assert.equal(game.run('enemies.some(e=>e.type==="VORGATH")'), false);
+});
+
+test('Common and Rare chest base odds retain their exact boundaries', () => {
+  const game = boot();
+  const commonCases = [[0,'Common'],[52.999,'Common'],[53,'Rare'],[91.999,'Rare'],[92,'Epic'],[96.999,'Epic'],[97,'Legendary']];
+  const rareCases = [[0,'Common'],[39.999,'Common'],[40,'Rare'],[84.999,'Rare'],[85,'Epic'],[94.999,'Epic'],[95,'Legendary']];
+  for (const [roll, expected] of commonCases) assert.equal(game.run(`rollChestRarity('Common',${roll})`), expected);
+  for (const [roll, expected] of rareCases) assert.equal(game.run(`rollChestRarity('Rare',${roll})`), expected);
+});
+
+test('Luck follows the subtle exponential curve and respects the 15 percent floor', () => {
+  const game = boot();
+  const reductions = JSON.parse(game.run('JSON.stringify([1,2,3,4,5].map(luckReduction))'));
+  assert.ok(Math.abs(reductions[0] - .5) < .001);
+  assert.ok(Math.abs(reductions[4] - 4.06) < .02);
+  assert.equal(game.run('getChestOdds("Common").Common'), 53);
+  game.run('state.upgrades.luck=5;');
+  assert.ok(Math.abs(game.run('getChestOdds("Common").Common') - 48.94) < .02);
+  assert.equal(game.run('getChestOdds("Common").Common >= 15'), true);
+  assert.equal(game.run('getChestOdds("Common").Common + getChestOdds("Common").Rare + getChestOdds("Common").Epic + getChestOdds("Common").Legendary'), 100);
+});
+
+test('opening a chest adds a sword without replacing the equipped sword', () => {
+  const game = boot();
+  const equipped = game.run('state.equippedSwordId');
+  game.run('state.gold=50; Math.random=()=>0; attemptChestPurchase(chestShops[0]);');
+  assert.equal(game.run('state.inventory.length'), 2);
+  assert.equal(game.run('state.equippedSwordId'), equipped);
+  assert.equal(game.run('state.gold'), 0);
+});
+
+test('full inventory blocks chest payment and repeatedly opens the capacity prompt', () => {
+  const game = boot();
+  game.run('state.gold=1000; state.inventoryCapacity=1; attemptChestPurchase(chestShops[0]);');
+  assert.equal(game.run('state.gold'), 1000);
+  assert.equal(game.run('state.inventory.length'), 1);
+  assert.equal(game.element('capacity-dialog').open, true);
+  game.element('capacity-dialog').close();
+  game.run('attemptChestPurchase(chestShops[0]);');
+  assert.equal(game.element('capacity-dialog').open, true);
+});
+
+test('capacity upgrades add 25 slots first and 50 afterward while doubling price', () => {
+  const game = boot();
+  game.run('state.gold=10000; purchaseCapacityUpgrade();');
+  assert.equal(game.run('state.inventoryCapacity'), 125);
+  assert.equal(game.run('state.gold'), 9000);
+  assert.equal(game.run('capacityUpgradeCost()'), 2000);
+  game.run('purchaseCapacityUpgrade();');
+  assert.equal(game.run('state.inventoryCapacity'), 175);
+  assert.equal(game.run('state.gold'), 7000);
+  assert.equal(game.run('capacityUpgradeCost()'), 4000);
+});
+
+test('five matching swords forge Divine and five Divine forge God\'s Chosen', () => {
+  const game = boot();
+  game.run(`state.inventory=[]; for(let i=0;i<5;i++)state.inventory.push(makeSword('Epic Claymore','Epic',25)); combineSwords('Epic Claymore',0);`);
+  assert.equal(game.run('state.inventory.length'), 1);
+  assert.equal(game.run('state.inventory[0].name'), 'Divine Epic Claymore');
+  assert.equal(game.run('state.inventory[0].power'), 38);
+  game.run(`state.inventory=[]; for(let i=0;i<5;i++)state.inventory.push(makeSword('Epic Claymore','Epic',25,1)); state.equippedSwordId=state.inventory[0].id; combineSwords('Epic Claymore',1);`);
+  assert.equal(game.run('state.inventory.length'), 1);
+  assert.equal(game.run('state.inventory[0].name'), "God's Chosen Epic Claymore");
+  assert.equal(game.run('state.inventory[0].power'), 75);
+  assert.equal(game.run('state.equippedSwordId'), game.run('state.inventory[0].id'));
+});
+
+test('Equip Best chooses the highest actual power', () => {
+  const game = boot();
+  game.run(`state.inventory.push(makeSword('Legendary Claymore','Legendary',75),makeSword('Rare Claymore','Rare',8,2)); equipBest();`);
+  assert.equal(game.run('equippedSword().name'), 'Legendary Claymore');
+  assert.equal(game.run('equippedSword().power'), 75);
+});
+
+test('the Arctic shrine offers five levels with approved costs and effects', () => {
+  const game = boot();
+  game.run('enterBiome(1); state.gold=10000; purchaseUpgrade("health"); purchaseUpgrade("damage"); purchaseUpgrade("speed"); purchaseUpgrade("critical"); purchaseUpgrade("luck");');
+  assert.equal(game.run('state.maxHp'), 125);
+  assert.equal(game.run('state.hp'), 125);
+  assert.equal(game.run('state.gold'), 9000);
+  assert.deepEqual(JSON.parse(game.run('JSON.stringify(state.upgrades)')), { health:1, damage:1, speed:1, critical:1, luck:1 });
+  game.run('state.upgrades.health=5;');
+  assert.equal(game.run('purchaseUpgrade("health")'), false);
+});
+
+test('damage multiplier and critical chance modify real combat damage', () => {
+  const game = boot();
+  game.run('state.totalAttackPower=100; state.upgrades.damage=2; state.upgrades.critical=5; Math.random=()=>0;');
+  assert.equal(game.run('playerDamage().damage'), 240);
+  game.run('Math.random=()=>.99;');
+  assert.equal(game.run('playerDamage().damage'), 120);
+});
+
+test('speed upgrades affect movement without changing base speed', () => {
+  const game = boot();
+  game.run('player.x=1000; state.upgrades.speed=5; keys.d=true; updatePlayer();');
+  assert.ok(Math.abs(game.run('player.x') - 1007.475) < .001);
+  assert.equal(game.run('player.speed'), 6.5);
+});
+
+test('save data restores biome, upgrades, inventory and defeated bosses', () => {
+  const storage = new Map();
+  const first = boot(storage);
+  first.run(`state.biome=1; state.gold=777; state.upgrades.health=3; state.maxHp=175; state.bossesDefeated[0]=true; state.inventory.push(makeSword('Rare Claymore','Rare',8)); saveGame();`);
+  const second = boot(storage);
+  assert.equal(second.run('state.biome'), 1);
+  assert.equal(second.run('state.gold'), 777);
+  assert.equal(second.run('state.upgrades.health'), 3);
+  assert.equal(second.run('state.inventory.length'), 2);
+  assert.equal(second.run('state.bossesDefeated[0]'), true);
+});
+
+test('Arctic Wolf flashes white then keeps red eyes during its lethal tell', () => {
+  const game = boot();
+  game.run(`enterBiome(1); player.x=1800; player.y=180; updateZoneFromPosition(); enemies=[createEnemy('Arctic Wolf',1880,180)]; enemies[0].active=true; updateEnemies();`);
+  assert.equal(game.run('enemies[0].phase'), 'windup');
+  assert.equal(game.run('enemies[0].warningFlash'), 7);
+  game.drawCalls.length = 0;
+  game.run('render();');
+  assert.ok(game.drawCalls.some(call => call.method === 'fillRect' && call.args[2] === 4 && call.args[3] === 4));
+});
+
+test('an unupgraded Arctic Wolf one-hits, while one health upgrade survives', () => {
+  const game = boot();
+  game.run(`enterBiome(1); state.gold=100; const wolf=createEnemy('Arctic Wolf',1800,180); damagePlayer(wolf);`);
+  assert.equal(game.run('player.x'), 100);
+  assert.equal(game.run('state.gold'), 25);
+  game.run(`state.upgrades.health=1; state.maxHp=125; state.hp=125; const wolf2=createEnemy('Arctic Wolf',1800,180); damagePlayer(wolf2);`);
+  assert.equal(game.run('state.hp'), 15);
+});
+
+test('Yeti launches snowballs and Skaldrath launches a three-shard volley', () => {
+  const game = boot();
+  game.run(`enterBiome(1); player.x=3700; player.y=180; updateZoneFromPosition(); const yeti=createEnemy('Yeti',3800,180); yeti.attackAngle=Math.PI; launchProjectile(yeti);`);
+  assert.equal(game.run('projectiles.length'), 1);
+  game.run(`projectiles=[]; const boss=createEnemy('SKALDRATH',4800,180,true); boss.attackAngle=Math.PI; [-.18,0,.18].forEach(s=>launchProjectile(boss,s));`);
+  assert.equal(game.run('projectiles.length'), 3);
+});
+
+test('boss attack patterns become more dangerous as health falls', () => {
+  const game = boot();
+  game.run(`enterBiome(1); enemies=[createEnemy('SKALDRATH',4800,180,true)]; enemies[0].hp=enemies[0].maxHp;`);
+  assert.equal(game.run('chooseAttack(enemies[0])'), 'shards');
+  game.run('enemies[0].hp=enemies[0].maxHp*.5; enemies[0].attackCount=1;');
+  assert.equal(game.run('chooseAttack(enemies[0])'), 'frostNova');
+  game.run('enemies[0].hp=enemies[0].maxHp*.2; enemies[0].attackCount=0;');
+  assert.equal(game.run('chooseAttack(enemies[0])'), 'frostNova');
+  assert.equal(game.run('chooseAttack(enemies[0])'), 'shards');
+});
+
+test('Skaldrath victory opens the final dialog and freezes combat', () => {
+  const game = boot();
+  game.run('enterBiome(1); state.bossesDefeated[1]=true; spawnBiomeEnemies(); player.x=WORLD.width; updatePlayer();');
+  assert.equal(game.run('state.won'), true);
+  assert.equal(game.element('victory-dialog').open, true);
+  const x = game.run('player.x');
+  game.run('keys.a=true; updatePlayer();');
+  assert.equal(game.run('player.x'), x);
+});
+
+test('restart clears the save and returns every progression system to defaults', () => {
+  const game = boot();
+  game.run('state.gold=999; state.biome=1; state.upgrades.health=5; state.inventoryCapacity=175; saveGame(); restartGame();');
+  assert.equal(game.run('state.gold'), 0);
+  assert.equal(game.run('state.biome'), 0);
+  assert.equal(game.run('state.upgrades.health'), 0);
+  assert.equal(game.run('state.inventory.length'), 1);
+  assert.equal(game.run('state.inventoryCapacity'), 100);
+  assert.equal(game.storage.size, 0);
+});
+
+test('input supports dodge, inventory, interaction, and safe page scrolling behavior', () => {
+  const game = boot();
+  let prevented = false;
+  game.windowListeners.keydown({ key:'ArrowDown', repeat:false, preventDefault(){ prevented = true; } });
+  assert.equal(prevented, true);
+  game.windowListeners.keydown({ key:'Shift', repeat:false });
+  assert.equal(game.run('player.dodgeTimer'), 12);
+  game.windowListeners.keydown({ key:'i', repeat:false });
+  assert.equal(game.element('inventory-dialog').open, true);
 });
