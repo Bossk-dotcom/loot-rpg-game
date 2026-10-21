@@ -139,13 +139,24 @@ dialog button {
   background-color: #14141d;
 }
 
-#gameCanvas {
-  display: block;
+#canvas-stage {
+  container-type: size;
+  display: grid;
   flex: 1 1 auto;
   min-height: 0;
+  place-items: center;
   width: 100%;
-  height: 100%;
-  object-fit: contain;
+}
+
+#gameCanvas {
+  aspect-ratio: 16 / 9;
+  display: block;
+  height: auto;
+  max-height: 100%;
+  max-width: 100%;
+  width: 100%;
+  height: min(100cqh, 56.25cqw);
+  width: min(100cqw, 177.7778cqh);
   background-color: #181824;
   image-rendering: pixelated;
 }

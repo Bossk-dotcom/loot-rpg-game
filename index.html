@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pixel Loot & Battle RPG</title>
-  <link rel="stylesheet" href="style.css?v=fullscreen-fit-20261020">
+  <link rel="stylesheet" href="style.css?v=aspect-stage-20261020">
 </head>
 <body>
   <div id="game-container">
@@ -32,7 +32,9 @@
       </div>
     </div>
     <div id="canvas-container">
-      <canvas id="gameCanvas" width="800" height="450" tabindex="0" aria-label="Game area. Move with WASD or arrow keys. Hold Space or left-click to swing. Press Shift to dodge."></canvas>
+      <div id="canvas-stage">
+        <canvas id="gameCanvas" width="800" height="450" tabindex="0" aria-label="Game area. Move with WASD or arrow keys. Hold Space or left-click to swing. Press Shift to dodge."></canvas>
+      </div>
       <div id="controls-tip"><b>WASD / Arrows</b> Move · <b>Hold Space / Left-Click</b> Swing · <b>Shift</b> Dodge · <b>E</b> Interact · <b>I</b> Inventory</div>
     </div>
 
