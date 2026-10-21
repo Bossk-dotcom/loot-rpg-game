@@ -59,6 +59,8 @@ body {
 
 #combat-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
@@ -72,13 +74,24 @@ body {
   justify-content: center;
 }
 
-#dodge-status {
+#dodge-status,
+#attack-status {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-#dodge-track {
+kbd {
+  background: #f8fafc;
+  border: 1px solid #94a3b8;
+  border-radius: 3px;
+  color: #0f172a;
+  font-weight: bold;
+  padding: 1px 4px;
+}
+
+#dodge-track,
+#attack-track {
   width: 80px;
   height: 8px;
   background-color: #1e293b;
@@ -91,6 +104,13 @@ body {
   width: 100%;
   height: 100%;
   background-color: #38bdf8;
+  transition: width 0.05s linear;
+}
+
+#attack-fill {
+  width: 100%;
+  height: 100%;
+  background-color: #f59e0b;
   transition: width 0.05s linear;
 }
 

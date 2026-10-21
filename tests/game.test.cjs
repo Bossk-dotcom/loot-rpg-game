@@ -61,7 +61,7 @@ function nearEnemy(game, type) {
 test('the real HTML and game script boot with every required control', () => {
   const game = boot();
   assert.equal(game.frames.length, 1);
-  for (const id of ['inventory-button','inventory-dialog','upgrade-dialog','capacity-dialog','victory-dialog']) assert.ok(documentIds.has(id));
+  for (const id of ['inventory-button','inventory-dialog','upgrade-dialog','capacity-dialog','victory-dialog','attack-text','attack-fill']) assert.ok(documentIds.has(id));
   game.frames.shift()(0);
   assert.equal(game.frames.length, 1);
   assert.ok(game.drawCalls.some(call => call.method === 'fillText' && call.args[0] === 'DUMMY'));
@@ -89,6 +89,40 @@ test('Arctic enemies use the approved health, attack and gold values', () => {
   });
 });
 
+test('Arctic health scales with base attack while preserving approved minimums', () => {
+  const game = boot();
+  game.run('state.totalAttackPower=1000; enterBiome(1);');
+  assert.equal(game.run('enemies.find(e=>e.type==="Penguin").maxHp'), 5000);
+  assert.equal(game.run('enemies.find(e=>e.type==="Arctic Wolf").maxHp'), 8000);
+  assert.equal(game.run('enemies.find(e=>e.type==="Polar Bear").maxHp'), 14000);
+  assert.equal(game.run('enemies.find(e=>e.type==="Yeti").maxHp'), 24000);
+  assert.equal(game.run('enemies.find(e=>e.type==="SKALDRATH").maxHp'), 50000);
+});
+
+test('Arctic health locks on first entry and never rescale afterward', () => {
+  const game = boot();
+  game.run('state.totalAttackPower=100; enterBiome(1); state.totalAttackPower=500; spawnBiomeEnemies();');
+  assert.equal(game.run('state.biomeAttackScales[1]'), 100);
+  assert.equal(game.run('enemies.find(e=>e.type==="Penguin").maxHp'), 500);
+  game.run('enterBiome(0); enterBiome(1);');
+  assert.equal(game.run('enemies.find(e=>e.type==="Penguin").maxHp'), 500);
+});
+
+test('the locked Arctic health scale persists in saved progress', () => {
+  const storage = new Map(), first = boot(storage);
+  first.run('state.totalAttackPower=250; enterBiome(1); state.totalAttackPower=900; saveGame();');
+  const loaded = boot(storage);
+  assert.equal(loaded.run('state.biomeAttackScales[1]'), 250);
+  assert.equal(loaded.run('enemies.find(e=>e.type==="Penguin").maxHp'), 1250);
+});
+
+test('Arctic scaling ignores damage upgrades so progression still shortens fights', () => {
+  const game = boot();
+  game.run('state.totalAttackPower=500; state.upgrades.damage=5; enterBiome(1);');
+  assert.equal(game.run('enemies.find(e=>e.type==="Penguin").maxHp'), 2500);
+  assert.equal(game.run('playerDamage().damage'), 750);
+});
+
 test('the camera follows the player through a world wider than the canvas', () => {
   const game = boot();
   assert.ok(game.run('WORLD.width') > 800);
@@ -107,6 +141,24 @@ test('regular monsters remain passive until struck', () => {
   game.run('triggerAttack();');
   assert.equal(game.run('enemies[0].active'), true);
   assert.equal(game.run('enemies[0].hp'), 30);
+});
+
+test('every player attack has a one-second cooldown', () => {
+  const game = boot();
+  game.run('player.x=dummy.x; player.y=dummy.y; triggerAttack();');
+  assert.equal(game.run('state.totalAttackPower'), 11);
+  assert.equal(game.run('player.attackCooldown'), 60);
+  game.run('player.swinging=false; triggerAttack();');
+  assert.equal(game.run('state.totalAttackPower'), 11);
+  game.run('for(let i=0;i<60;i++) updatePlayer(); triggerAttack();');
+  assert.equal(game.run('state.totalAttackPower'), 12);
+});
+
+test('Arctic player has a dark silhouette, bright body, and YOU label', () => {
+  const game = boot();
+  game.run('enterBiome(1); render();');
+  assert.ok(game.drawCalls.some(call => call.method === 'fillText' && call.args[0] === 'YOU'));
+  assert.ok(game.drawCalls.some(call => call.method === 'fillRect' && call.args[0] === game.run('player.x+2') && call.args[1] === game.run('player.y-2')));
 });
 
 test('aggro persists at long range until safety or death', () => {

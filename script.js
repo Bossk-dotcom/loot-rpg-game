@@ -2,7 +2,7 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 const WORLD = { width: 5200, townEnd: 720, bossStart: 4540, bossSpawn: 4860, edgePadding: 20 };
-const COMBAT = { swordReach: 62, swordHalfAngle: Math.PI / 3, swingTicks: 20, dodgeTicks: 12, dodgeCooldown: 72, dodgeSpeed: 13, hurtGrace: 18, respawnTime: 480 };
+const COMBAT = { swordReach: 62, swordHalfAngle: Math.PI / 3, swingTicks: 20, attackCooldown: 60, dodgeTicks: 12, dodgeCooldown: 72, dodgeSpeed: 13, hurtGrace: 18, respawnTime: 480 };
 const BOSS_NAMES = ["Vorgath the Merciless", "Skaldrath the Frozen Tyrant"];
 const ENEMY_SPECS = {
   Goblin: { speed: 2.1, windup: 30, strikeTicks: 8, recovery: 35, reach: 65, color: "#22c55e", size: 24, hp: 40, atk: 5, gold: 15, attack: "cleave" },
@@ -10,11 +10,11 @@ const ENEMY_SPECS = {
   Knight: { speed: 1.3, windup: 50, strikeTicks: 12, recovery: 50, reach: 90, guardHalfAngle: Math.PI / 3, turnSpeed: Math.PI / 90, color: "#94a3b8", size: 32, hp: 350, atk: 25, gold: 80, attack: "cleave" },
   "Dark Knight": { speed: 1.1, windup: 60, strikeTicks: 14, recovery: 60, reach: 105, color: "#334155", size: 36, hp: 900, atk: 50, gold: 200, attack: "cleave" },
   VORGATH: { speed: 0.95, windup: 70, strikeTicks: 16, recovery: 65, reach: 135, smashRadius: 105, pounceRadius: 58, color: "#b91c1c", size: 52, hp: 3500, atk: 90, gold: 1000, boss: true },
-  Penguin: { speed: 2.5, windup: 38, strikeTicks: 10, recovery: 34, reach: 80, pounceRadius: 42, color: "#e2e8f0", size: 24, hp: 100, atk: 75, gold: 25, attack: "pounce" },
-  "Arctic Wolf": { speed: 2.8, windup: 58, strikeTicks: 10, recovery: 50, reach: 135, pounceRadius: 48, color: "#cbd5e1", size: 28, hp: 300, atk: 110, gold: 50, attack: "pounce", lethalTell: true },
-  "Polar Bear": { speed: 1.5, windup: 78, strikeTicks: 14, recovery: 75, reach: 95, smashRadius: 92, color: "#f8fafc", size: 40, hp: 875, atk: 135, gold: 120, attack: "smash" },
-  Yeti: { speed: 1.25, windup: 68, strikeTicks: 12, recovery: 62, reach: 260, projectileSpeed: 5.5, color: "#93c5fd", size: 44, hp: 2250, atk: 170, gold: 300, attack: "snowball" },
-  SKALDRATH: { speed: 1.05, windup: 72, strikeTicks: 18, recovery: 60, reach: 280, smashRadius: 125, projectileSpeed: 6.5, color: "#2563eb", size: 58, hp: 8750, atk: 210, gold: 1500, boss: true }
+  Penguin: { speed: 2.5, windup: 38, strikeTicks: 10, recovery: 34, reach: 80, pounceRadius: 42, color: "#e2e8f0", size: 24, hp: 100, minHits: 5, atk: 75, gold: 25, attack: "pounce" },
+  "Arctic Wolf": { speed: 2.8, windup: 58, strikeTicks: 10, recovery: 50, reach: 135, pounceRadius: 48, color: "#cbd5e1", size: 28, hp: 300, minHits: 8, atk: 110, gold: 50, attack: "pounce", lethalTell: true },
+  "Polar Bear": { speed: 1.5, windup: 78, strikeTicks: 14, recovery: 75, reach: 95, smashRadius: 92, color: "#f8fafc", size: 40, hp: 875, minHits: 14, atk: 135, gold: 120, attack: "smash" },
+  Yeti: { speed: 1.25, windup: 68, strikeTicks: 12, recovery: 62, reach: 260, projectileSpeed: 5.5, color: "#93c5fd", size: 44, hp: 2250, minHits: 24, atk: 170, gold: 300, attack: "snowball" },
+  SKALDRATH: { speed: 1.05, windup: 72, strikeTicks: 18, recovery: 60, reach: 280, smashRadius: 125, projectileSpeed: 6.5, color: "#2563eb", size: 58, hp: 8750, minHits: 50, atk: 210, gold: 1500, boss: true }
 };
 
 const BIOMES = [
@@ -56,9 +56,9 @@ const createInitialState = () => {
   const starter = makeSword("Starter Sword", "Common", 1);
   return { biome: 0, zone: 0, gold: 0, hp: 100, maxHp: 100, totalAttackPower: 10, tollCost: 500, tollPaid: false, unlockedBiomes: 1,
     bossesDefeated: [false, false], bossLocked: false, inventory: [starter], inventoryCapacity: 100, capacityUpgrades: 0,
-    equippedSwordId: starter.id, equippedSword: starter, upgrades: { health: 0, damage: 0, speed: 0, critical: 0, luck: 0 }, won: false };
+    biomeAttackScales: [null, null], equippedSwordId: starter.id, equippedSword: starter, upgrades: { health: 0, damage: 0, speed: 0, critical: 0, luck: 0 }, won: false };
 };
-const createInitialPlayer = () => ({ x: 100, y: 200, size: 28, speed: 6.5, facing: "right", swinging: false, swingTimer: 0, swingAngle: 0, swingOrigin: null, dodgeTimer: 0, dodgeCooldown: 0, dodgeX: 0, dodgeY: 0, invulnerableTimer: 0, hitFlash: 0 });
+const createInitialPlayer = () => ({ x: 100, y: 200, size: 28, speed: 6.5, facing: "right", swinging: false, swingTimer: 0, attackCooldown: 0, swingAngle: 0, swingOrigin: null, dodgeTimer: 0, dodgeCooldown: 0, dodgeX: 0, dodgeY: 0, invulnerableTimer: 0, hitFlash: 0 });
 
 let state = createInitialState();
 const player = createInitialPlayer();
@@ -117,6 +117,7 @@ function loadGame() {
     state = Object.assign(fresh, saved.state || {});
     state.upgrades = Object.assign(fresh.upgrades, saved.state?.upgrades || {});
     state.bossesDefeated = [false, false].map((value, index) => Boolean(saved.state?.bossesDefeated?.[index] ?? value));
+    state.biomeAttackScales = [null, null].map((value, index) => Number.isFinite(saved.state?.biomeAttackScales?.[index]) ? saved.state.biomeAttackScales[index] : value);
     state.inventory = Array.isArray(saved.state?.inventory) && saved.state.inventory.length ? saved.state.inventory : fresh.inventory;
     nextItemId = Math.max(saved.nextItemId || 1, state.inventory.length + 1);
     if (!state.inventory.some(item => item.id === state.equippedSwordId)) state.equippedSwordId = state.inventory[0].id;
@@ -138,9 +139,12 @@ function updateZoneFromPosition() { state.zone = state.biome * 6 + currentRegion
 function isSafeArea() { return player.x < WORLD.townEnd || (!currentBossAlive() && player.x > WORLD.bossStart); }
 
 function resetEnemyCombat(enemy, returning = false) { Object.assign(enemy, { active: false, returning, phase: "idle", phaseTimer: 0, attackKind: null, attackAngle: 0, attackOrigin: null, attackTarget: null, facingAngle: Math.PI, blockFlash: 0, hitFlash: 0, warningFlash: 0 }); }
+function lockBiomeAttackScale(index = state.biome) { if (index > 0 && !Number.isFinite(state.biomeAttackScales[index])) state.biomeAttackScales[index] = state.totalAttackPower; return state.biomeAttackScales[index] ?? state.totalAttackPower; }
+function scaledEnemyHealth(type) { const spec = ENEMY_SPECS[type]; return spec.minHits ? Math.max(spec.hp, Math.ceil(lockBiomeAttackScale() * spec.minHits)) : spec.hp; }
 function createEnemy(type, x, y, boss = false) {
   const spec = ENEMY_SPECS[type];
-  return { x, y, homeX: x, homeY: y, size: spec.size, hp: spec.hp, maxHp: spec.hp, atk: spec.atk, type, name: boss ? currentBiome().bossName : type, color: spec.color, goldValue: spec.gold, boss, active: false, returning: false, phase: "idle", phaseTimer: 0, attackKind: null, attackAngle: 0, attackOrigin: null, attackTarget: null, facingAngle: Math.PI, blockFlash: 0, hitFlash: 0, warningFlash: 0, attackCount: 0, respawnTimer: 0 };
+  const maxHp = scaledEnemyHealth(type);
+  return { x, y, homeX: x, homeY: y, size: spec.size, hp: maxHp, maxHp, atk: spec.atk, type, name: boss ? currentBiome().bossName : type, color: spec.color, goldValue: spec.gold, boss, active: false, returning: false, phase: "idle", phaseTimer: 0, attackKind: null, attackAngle: 0, attackOrigin: null, attackTarget: null, facingAngle: Math.PI, blockFlash: 0, hitFlash: 0, warningFlash: 0, attackCount: 0, respawnTimer: 0 };
 }
 function spawnBiomeEnemies() {
   enemies = []; effects = []; projectiles = []; state.bossLocked = false; player.dodgeTimer = 0; player.swinging = false; player.swingTimer = 0;
@@ -168,7 +172,8 @@ function buyChest(tier) {
   state.inventory.push(sword); showStatus(`Opened ${tier} Chest: Found ${sword.name} (+${sword.power} Training Power)!`); renderInventory(); updateHUD(); saveGame(); return sword;
 }
 function triggerAttack() {
-  if (state.won || player.swinging || player.dodgeTimer > 0 || anyDialogOpen()) return;
+  if (state.won || player.swinging || player.attackCooldown > 0 || player.dodgeTimer > 0 || anyDialogOpen()) return;
+  player.attackCooldown = COMBAT.attackCooldown;
   player.swinging = true; player.swingTimer = currentRegion() === 0 ? 12 : COMBAT.swingTicks;
   const [facingX, facingY] = facingVectors[player.facing]; player.swingAngle = Math.atan2(facingY, facingX); player.swingOrigin = center(player); playSound("swing");
   if (currentRegion() === 0) {
@@ -194,7 +199,7 @@ function defeatEnemy(enemy) {
 }
 function triggerDodge() { if (state.won || player.dodgeCooldown > 0 || player.dodgeTimer > 0 || anyDialogOpen()) return; let [dx, dy] = movementVector(); if (!dx && !dy) [dx, dy] = facingVectors[player.facing]; Object.assign(player, { dodgeX: dx, dodgeY: dy, dodgeTimer: COMBAT.dodgeTicks, dodgeCooldown: COMBAT.dodgeCooldown, swinging: false, swingTimer: 0 }); playSound("dodge"); }
 
-function enterBiome(index, x = 100) { state.biome = index; player.x = x; player.y = 200; state.hp = state.maxHp; Object.assign(player, { dodgeTimer: 0, dodgeCooldown: 0, invulnerableTimer: 0, swinging: false, swingTimer: 0 }); spawnBiomeEnemies(); cameraX = Math.max(0, Math.min(WORLD.width - canvas.width, player.x - canvas.width / 2)); updateHUD(); saveGame(); }
+function enterBiome(index, x = 100) { state.biome = index; lockBiomeAttackScale(index); player.x = x; player.y = 200; state.hp = state.maxHp; Object.assign(player, { dodgeTimer: 0, dodgeCooldown: 0, invulnerableTimer: 0, swinging: false, swingTimer: 0 }); spawnBiomeEnemies(); cameraX = Math.max(0, Math.min(WORLD.width - canvas.width, player.x - canvas.width / 2)); updateHUD(); saveGame(); }
 function advanceBiome() {
   if (state.biome === 0) {
     if (!state.tollPaid) { if (state.gold < state.tollCost) { player.x = WORLD.width - player.size - 25; showStatus(`The Arctic toll costs 💰${state.tollCost}.`); return; } state.gold -= state.tollCost; state.tollPaid = true; state.unlockedBiomes = 2; }
@@ -208,7 +213,7 @@ function updatePlayer() {
   let dx = 0, dy = 0;
   if (keys.w || keys.arrowup) { dy--; player.facing = "up"; } if (keys.s || keys.arrowdown) { dy++; player.facing = "down"; } if (keys.a || keys.arrowleft) { dx--; player.facing = "left"; } if (keys.d || keys.arrowright) { dx++; player.facing = "right"; }
   if (dx && dy) { dx *= .7071; dy *= .7071; }
-  if (player.dodgeCooldown > 0) player.dodgeCooldown--; if (player.invulnerableTimer > 0) player.invulnerableTimer--; if (player.hitFlash > 0) player.hitFlash--;
+  if (player.attackCooldown > 0) player.attackCooldown--; if (player.dodgeCooldown > 0) player.dodgeCooldown--; if (player.invulnerableTimer > 0) player.invulnerableTimer--; if (player.hitFlash > 0) player.hitFlash--;
   const previousX = player.x;
   if (player.dodgeTimer > 0) { const point = center(player); addEffect(point.x, point.y, "", "#67e8f9", 12, 0, 0); player.x += player.dodgeX * COMBAT.dodgeSpeed; player.y += player.dodgeY * COMBAT.dodgeSpeed; player.dodgeTimer--; }
   else { const speed = player.speed * (1 + state.upgrades.speed * .03); player.x += dx * speed; player.y += dy * speed; }
@@ -299,27 +304,31 @@ function interact() { if (state.biome === 1 && currentRegion() === 0 && Math.hyp
 function completeAdventure() { if (state.won) return; state.won = true; clearInput(); effects = []; projectiles = []; updateHUD(); document.getElementById("victory-summary").textContent = `Skaldrath has fallen. You hold ${state.gold} gold, ${state.totalAttackPower} base attack, and ${state.inventory.length} swords.`; document.getElementById("victory-dialog").showModal(); saveGame(); }
 function restartGame() { try { window.localStorage?.removeItem(SAVE_KEY); } catch (_) {} nextItemId = 1; state = createInitialState(); Object.assign(player, createInitialPlayer()); effects = []; projectiles = []; pauseInput(); document.getElementById("victory-dialog").close(); spawnBiomeEnemies(); renderInventory(); updateHUD(); showStatus(`Welcome to Town. Train, collect swords, and hunt ${BOSS_NAMES[0]}.`); canvas.focus(); }
 
+function drawReadableLabel(text, x, y, color = "#ffffff", align = "left") {
+  ctx.save(); ctx.font = "bold 12px Courier New"; ctx.textAlign = align; ctx.lineWidth = 4; ctx.strokeStyle = "rgba(3, 7, 18, .92)"; ctx.strokeText(text, x, y); ctx.fillStyle = color; ctx.fillText(text, x, y); ctx.restore();
+}
+
 function drawWorldBackground() {
   const biome = currentBiome(); ctx.fillStyle = biome.background; ctx.fillRect(cameraX, 0, canvas.width, canvas.height); ctx.fillStyle = biome.ground; ctx.fillRect(cameraX, 40, canvas.width, canvas.height - 80);
-  biome.tiers.forEach((tier, index) => { ctx.fillStyle = state.biome === 0 ? (index % 2 ? "#2f4c32" : "#3e613b") : (index % 2 ? "#c9eaf4" : "#e8f8fc"); ctx.fillRect(tier.start, 40, tier.end - tier.start, canvas.height - 80); ctx.fillStyle = state.biome === 0 ? "#d1fae5" : "#0c4a6e"; ctx.font = "bold 13px Courier New"; ctx.fillText(tier.label, tier.start + 20, 65); });
-  ctx.fillStyle = state.biome === 0 ? "#391c24" : "#16396b"; ctx.fillRect(WORLD.bossStart, 40, WORLD.width - WORLD.bossStart, canvas.height - 80); ctx.fillStyle = "#fca5a5"; ctx.font = "bold 14px Courier New"; ctx.fillText(`${biome.bossName.toUpperCase()}'S DEN`, WORLD.bossStart + 28, 68);
+  biome.tiers.forEach((tier, index) => { ctx.fillStyle = state.biome === 0 ? (index % 2 ? "#2f4c32" : "#3e613b") : (index % 2 ? "#c9eaf4" : "#e8f8fc"); ctx.fillRect(tier.start, 40, tier.end - tier.start, canvas.height - 80); drawReadableLabel(tier.label, tier.start + 20, 65, state.biome === 0 ? "#d1fae5" : "#e0f2fe"); });
+  ctx.fillStyle = state.biome === 0 ? "#391c24" : "#16396b"; ctx.fillRect(WORLD.bossStart, 40, WORLD.width - WORLD.bossStart, canvas.height - 80); drawReadableLabel(`${biome.bossName.toUpperCase()}'S DEN`, WORLD.bossStart + 28, 68, "#fecaca");
 }
 function drawTown() {
-  ctx.fillStyle = state.biome === 0 ? "#9a6b32" : "#effcff"; ctx.fillRect(0, 40, WORLD.townEnd, canvas.height - 80); ctx.fillStyle = "#d97706"; ctx.fillRect(dummy.x, dummy.y, dummy.width, dummy.height); ctx.fillStyle = "#78350f"; ctx.fillRect(dummy.x + 12, dummy.y + dummy.height, 8, 16); ctx.fillStyle = "#ffffff"; ctx.font = "12px Courier New"; ctx.fillText("DUMMY", dummy.x - 2, dummy.y - 8);
-  chestShops.forEach(shop => { ctx.fillStyle = shop.color; ctx.fillRect(shop.x, shop.y, 42, 32); ctx.strokeStyle = "#ffffff"; ctx.strokeRect(shop.x, shop.y, 42, 32); const odds = getChestOdds(shop.tier); ctx.fillStyle = "#111827"; ctx.font = "bold 11px Courier New"; ctx.fillText(`${shop.tier} Chest`, shop.x - 8, shop.y - 12); ctx.font = "10px Courier New"; ctx.fillText(`💰${shop.cost}`, shop.x, shop.y + 47); ctx.fillText(`C${odds.Common.toFixed(1)} R${odds.Rare.toFixed(1)}`, shop.x - 12, shop.y + 62); ctx.fillText(`E${odds.Epic.toFixed(1)} L${odds.Legendary.toFixed(1)}`, shop.x - 12, shop.y + 74); });
-  if (state.biome === 1) { ctx.fillStyle = "#7c3aed"; ctx.fillRect(upgradeShrine.x, upgradeShrine.y, upgradeShrine.width, upgradeShrine.height); ctx.fillStyle = "#ffffff"; ctx.font = "bold 11px Courier New"; ctx.fillText("UPGRADE SHRINE", upgradeShrine.x - 30, upgradeShrine.y - 10); ctx.fillText("Press E", upgradeShrine.x - 4, upgradeShrine.y + 76); }
+  ctx.fillStyle = state.biome === 0 ? "#9a6b32" : "#effcff"; ctx.fillRect(0, 40, WORLD.townEnd, canvas.height - 80); ctx.fillStyle = "#d97706"; ctx.fillRect(dummy.x, dummy.y, dummy.width, dummy.height); ctx.fillStyle = "#78350f"; ctx.fillRect(dummy.x + 12, dummy.y + dummy.height, 8, 16); drawReadableLabel("DUMMY", dummy.x + dummy.width / 2, dummy.y - 8, "#ffffff", "center");
+  chestShops.forEach(shop => { ctx.fillStyle = shop.color; ctx.fillRect(shop.x, shop.y, 42, 32); ctx.strokeStyle = "#ffffff"; ctx.strokeRect(shop.x, shop.y, 42, 32); const odds = getChestOdds(shop.tier); drawReadableLabel(`${shop.tier} Chest`, shop.x + 21, shop.y - 12, "#ffffff", "center"); drawReadableLabel(`💰${shop.cost}`, shop.x + 21, shop.y + 47, "#fde68a", "center"); drawReadableLabel(`C${odds.Common.toFixed(1)} R${odds.Rare.toFixed(1)}`, shop.x + 21, shop.y + 62, "#e2e8f0", "center"); drawReadableLabel(`E${odds.Epic.toFixed(1)} L${odds.Legendary.toFixed(1)}`, shop.x + 21, shop.y + 76, "#e2e8f0", "center"); });
+  if (state.biome === 1) { ctx.fillStyle = "#7c3aed"; ctx.fillRect(upgradeShrine.x, upgradeShrine.y, upgradeShrine.width, upgradeShrine.height); drawReadableLabel("UPGRADE SHRINE", upgradeShrine.x + upgradeShrine.width / 2, upgradeShrine.y - 10, "#ffffff", "center"); drawReadableLabel("Press E", upgradeShrine.x + upgradeShrine.width / 2, upgradeShrine.y + 76, "#ffffff", "center"); }
 }
-function drawPixelPlayer() { ctx.fillStyle = player.hitFlash > 0 ? "#ffffff" : "#ef4444"; ctx.fillRect(player.x + 4, player.y, 20, 8); ctx.fillStyle = "#06b6d4"; ctx.fillRect(player.x + (player.facing === "left" ? 0 : 16), player.y + 4, 8, 4); ctx.fillStyle = "#f8fafc"; ctx.fillRect(player.x + 5, player.y + 8, 18, 20); }
+function drawPixelPlayer() { ctx.fillStyle = "rgba(15, 23, 42, .45)"; ctx.fillRect(player.x - 4, player.y + player.size - 3, player.size + 8, 7); ctx.fillStyle = "#0f172a"; ctx.fillRect(player.x + 2, player.y - 2, 24, 32); ctx.fillStyle = player.hitFlash > 0 ? "#ffffff" : "#ef4444"; ctx.fillRect(player.x + 4, player.y, 20, 8); ctx.fillStyle = "#06b6d4"; ctx.fillRect(player.x + (player.facing === "left" ? 0 : 16), player.y + 4, 8, 4); ctx.fillStyle = "#facc15"; ctx.fillRect(player.x + 5, player.y + 8, 18, 20); drawReadableLabel("YOU", player.x + player.size / 2, player.y - 10, "#fef08a", "center"); }
 function drawKnightShield(enemy) { const point = center(enemy); ctx.strokeStyle = enemy.blockFlash > 0 ? "#ffffff" : "#7dd3fc"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(point.x, point.y, enemy.size / 2 + 9, enemy.facingAngle - Math.PI / 3, enemy.facingAngle + Math.PI / 3); ctx.stroke(); }
 function drawEnemies() {
-  enemies.forEach(enemy => { if (enemy.hp <= 0) return; ctx.fillStyle = enemy.warningFlash > 0 || enemy.hitFlash > 0 ? "#ffffff" : enemy.color; ctx.fillRect(enemy.x, enemy.y, enemy.size, enemy.size); const redEyes = enemy.type === "Arctic Wolf" && ["windup", "strike"].includes(enemy.phase); ctx.fillStyle = redEyes ? "#ef4444" : "#0f172a"; ctx.fillRect(enemy.x + 6, enemy.y + 7, 4, 4); ctx.fillRect(enemy.x + enemy.size - 10, enemy.y + 7, 4, 4); if (enemy.type === "Knight") drawKnightShield(enemy); const barWidth = enemy.size + (enemy.boss ? 90 : 10), barX = enemy.x + enemy.size / 2 - barWidth / 2, barY = enemy.y - 20; ctx.fillStyle = "#3f0b0b"; ctx.fillRect(barX, barY, barWidth, 7); ctx.fillStyle = "#22c55e"; ctx.fillRect(barX, barY, barWidth * enemy.hp / enemy.maxHp, 7); ctx.fillStyle = enemy.boss ? "#fca5a5" : "#ffffff"; ctx.font = `bold ${enemy.boss ? 12 : 10}px Courier New`; ctx.textAlign = "center"; ctx.fillText(enemy.boss ? enemy.name : `${enemy.hp}/${enemy.maxHp}`, enemy.x + enemy.size / 2, barY - 6); ctx.textAlign = "left"; });
+  enemies.forEach(enemy => { if (enemy.hp <= 0) return; ctx.fillStyle = enemy.warningFlash > 0 || enemy.hitFlash > 0 ? "#ffffff" : enemy.color; ctx.fillRect(enemy.x, enemy.y, enemy.size, enemy.size); const redEyes = enemy.type === "Arctic Wolf" && ["windup", "strike"].includes(enemy.phase); ctx.fillStyle = redEyes ? "#ef4444" : "#0f172a"; ctx.fillRect(enemy.x + 6, enemy.y + 7, 4, 4); ctx.fillRect(enemy.x + enemy.size - 10, enemy.y + 7, 4, 4); if (enemy.type === "Knight") drawKnightShield(enemy); const barWidth = enemy.size + (enemy.boss ? 90 : 10), barX = enemy.x + enemy.size / 2 - barWidth / 2, barY = enemy.y - 20; ctx.fillStyle = "#3f0b0b"; ctx.fillRect(barX, barY, barWidth, 7); ctx.fillStyle = "#22c55e"; ctx.fillRect(barX, barY, barWidth * enemy.hp / enemy.maxHp, 7); drawReadableLabel(enemy.boss ? enemy.name : `${enemy.hp}/${enemy.maxHp}`, enemy.x + enemy.size / 2, barY - 6, enemy.boss ? "#fecaca" : "#ffffff", "center"); });
 }
 function drawEnemyAttacks() {
   enemies.forEach(enemy => { if (enemy.hp <= 0 || enemy.phase !== "windup") return; const spec = ENEMY_SPECS[enemy.type], progress = 1 - enemy.phaseTimer / spec.windup; ctx.strokeStyle = enemy.type === "Arctic Wolf" ? "#ef4444" : "#fbbf24"; ctx.lineWidth = 3; if (["smash", "pounce"].includes(enemy.attackKind)) { ctx.beginPath(); ctx.arc(enemy.attackTarget.x, enemy.attackTarget.y, enemy.attackKind === "smash" ? spec.smashRadius : spec.pounceRadius, 0, Math.PI * 2); ctx.stroke(); } else if (enemy.attackKind === "frostNova") { ctx.beginPath(); ctx.arc(enemy.attackOrigin.x, enemy.attackOrigin.y, spec.smashRadius, 0, Math.PI * 2); ctx.stroke(); } else { ctx.beginPath(); ctx.arc(enemy.attackOrigin.x, enemy.attackOrigin.y, Math.max(enemy.size, spec.reach * progress), enemy.attackAngle - Math.PI / 3, enemy.attackAngle + Math.PI / 3); ctx.stroke(); } });
   projectiles.forEach(projectile => { ctx.fillStyle = projectile.color; ctx.beginPath(); ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2); ctx.fill(); });
 }
 function drawSwordSlash() { if (!player.swinging || !player.swingOrigin) return; const elapsed = COMBAT.swingTicks - player.swingTimer, sweep = player.swingAngle - COMBAT.swordHalfAngle + elapsed / COMBAT.swingTicks * COMBAT.swordHalfAngle * 2; ctx.strokeStyle = "#7dd3fc"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(player.swingOrigin.x + Math.cos(sweep) * 22, player.swingOrigin.y + Math.sin(sweep) * 22); ctx.lineTo(player.swingOrigin.x + Math.cos(sweep) * COMBAT.swordReach, player.swingOrigin.y + Math.sin(sweep) * COMBAT.swordReach); ctx.stroke(); }
-function drawEffects() { ctx.save(); ctx.textAlign = "center"; ctx.font = "bold 13px Courier New"; effects.forEach(effect => { ctx.fillStyle = effect.color; if (effect.text) ctx.fillText(effect.text, effect.x, effect.y); else ctx.fillRect(effect.x - 2, effect.y - 2, 4, 4); }); ctx.restore(); }
+function drawEffects() { effects.forEach(effect => { if (effect.text) drawReadableLabel(effect.text, effect.x, effect.y, effect.color, "center"); else { ctx.fillStyle = effect.color; ctx.fillRect(effect.x - 2, effect.y - 2, 4, 4); } }); }
 function render() { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.save(); ctx.translate(-cameraX, 0); drawWorldBackground(); drawTown(); if (state.bossLocked) { ctx.fillStyle = "#ef4444"; ctx.fillRect(WORLD.bossStart, 35, 8, canvas.height - 70); } drawEnemyAttacks(); drawEnemies(); drawPixelPlayer(); drawSwordSlash(); drawEffects(); ctx.restore(); }
 
 function regionName() { const region = currentRegion(); if (region === 0) return currentBiome().town; if (region === 5) return `${currentBiome().bossName}'s Den`; return currentBiome().tiers[region - 1]?.label || currentBiome().name; }
@@ -328,7 +337,7 @@ function updateHUD() {
   const inventoryCount = document.getElementById("inventory-count"); if (inventoryCount) inventoryCount.textContent = `${state.inventory.length}/${state.inventoryCapacity}`;
   const objective = document.getElementById("objective-text"); if (state.won) objective.textContent = "The Arctic tyrant has fallen. Your journey will continue in a future biome."; else if (state.bossLocked) objective.textContent = `Defeat ${currentBiome().bossName}. The arena is sealed.`; else if (currentRegion() === 0 && state.biome === 1) objective.textContent = "Spend gold at the upgrade shrine, manage your inventory, or enter the Arctic."; else if (currentRegion() === 0) objective.textContent = `Train and gather swords before confronting ${BOSS_NAMES[0]}.`; else objective.textContent = "Strike an enemy to provoke it. Aggro persists until it dies or you reach safety.";
 }
-function updateCombatHUD() { const status = player.dodgeTimer > 0 ? "Dodging" : player.dodgeCooldown > 0 ? `${(player.dodgeCooldown / 60).toFixed(1)}s` : "Ready"; document.getElementById("dodge-text").textContent = status; document.getElementById("dodge-fill").style.width = `${100 * (1 - player.dodgeCooldown / COMBAT.dodgeCooldown)}%`; }
+function updateCombatHUD() { const status = player.dodgeTimer > 0 ? "Dodging" : player.dodgeCooldown > 0 ? `${(player.dodgeCooldown / 60).toFixed(1)}s` : "Ready"; document.getElementById("dodge-text").textContent = status; document.getElementById("dodge-fill").style.width = `${100 * (1 - player.dodgeCooldown / COMBAT.dodgeCooldown)}%`; document.getElementById("attack-text").textContent = player.attackCooldown > 0 ? `${(player.attackCooldown / 60).toFixed(1)}s` : "Ready"; document.getElementById("attack-fill").style.width = `${100 * (1 - player.attackCooldown / COMBAT.attackCooldown)}%`; }
 function showStatus(message) { document.getElementById("status-banner").textContent = message; }
 function loop(timestamp) { if (lastTimestamp !== null && !document.hidden && !state.won) { accumulator += Math.min(timestamp - lastTimestamp, 100); while (accumulator + 1e-7 >= 1000 / 60) { updatePlayer(); if (keys[" "]) triggerAttack(); updateEnemies(); updateEffects(); accumulator -= 1000 / 60; } } lastTimestamp = timestamp; render(); updateCombatHUD(); requestAnimationFrame(loop); }
 

@@ -9,7 +9,7 @@ A browser RPG built with HTML, CSS, and JavaScript. Open `index.html` in a deskt
 - Move with WASD or the arrow keys across large scrolling biome maps.
 - Hold Space or left-click to swing. Press Shift to dodge.
 - Press E near the Arctic upgrade shrine. Press I or use the toolbar button to manage swords.
-- Train at either town's dummy to increase base attack using the equipped sword's power.
+- Train at either town's dummy to increase base attack using the equipped sword's power. All swings have a one-second cooldown, shown in the combat toolbar.
 - Strike a regular enemy to provoke it. Aggro persists until it dies or the player reaches a town, gate, or boss den.
 - Bosses automatically engage. Entering a living boss's den seals the entrance until victory or death.
 
@@ -20,6 +20,8 @@ The Fallen Kingdom contains Goblins, Orcs, Knights, Dark Knights, and Vorgath th
 Defeating Vorgath opens the forward gate. The first crossing costs a one-time 500-gold toll and unlocks the Endless Arctic. Later travel between unlocked biomes is free, and defeated bosses remain defeated.
 
 The Endless Arctic contains 15 Penguins, 10 Arctic Wolves, 5 Polar Bears, 3 Yetis, and Skaldrath the Frozen Tyrant. Arctic Wolves telegraph their lethal pounce with a white flash and red eyes. Polar Bears use ground smashes, Yetis throw snowballs, and Skaldrath changes attacks as his health falls.
+
+Arctic enemy health scales once from the player's base attack power upon first entering the biome, using the original health values as minimums. That health scale is saved and never changes during the adventure. Penguins initially require about 5 normal hits, Wolves 8, Polar Bears 14, Yetis 24, and Skaldrath 50 before Damage upgrades or critical hits. Later training, Damage upgrades, and critical hits therefore provide meaningful progression without retroactively strengthening enemies.
 
 Death returns the player to the current biome's town, resets enemy aggro, preserves upgrades and unlocks, and removes 75% of current gold.
 
