@@ -10,15 +10,15 @@ body {
   background-color: #0f0f14;
   color: #ffffff;
   display: flex;
-  justify-content: center;
-  align-items: center;
+  overflow: hidden;
   min-height: 100vh;
 }
 
 #game-container {
-  width: 100%;
-  max-width: 840px;
-  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
 }
 
 #hud {
@@ -30,8 +30,8 @@ body {
   background-color: #1a1a24;
   padding: 12px 20px;
   border: 3px solid #333344;
-  border-radius: 6px;
-  margin-bottom: 10px;
+  border-radius: 0;
+  flex: 0 0 auto;
   font-weight: bold;
 }
 
@@ -63,7 +63,8 @@ body {
   gap: 8px 14px;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
   font-size: 13px;
 }
 
@@ -127,21 +128,29 @@ dialog button {
 }
 
 #canvas-container {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
   position: relative;
   border: 3px solid #333344;
-  border-radius: 6px;
+  border-radius: 0;
   overflow: hidden;
   background-color: #14141d;
 }
 
 #gameCanvas {
   display: block;
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
-  height: auto;
+  height: 100%;
   background-color: #181824;
+  image-rendering: pixelated;
 }
 
 #controls-tip {
+  flex: 0 0 auto;
   text-align: center;
   padding: 6px;
   background-color: #121218;
@@ -151,12 +160,23 @@ dialog button {
 }
 
 #status-banner {
-  margin-top: 10px;
+  flex: 0 0 auto;
   padding: 10px 14px;
   background-color: #1e1e2d;
   border-left: 4px solid #3b82f6;
   font-size: 13px;
   color: #e2e8f0;
+}
+
+@media (max-height: 700px) {
+  #hud,
+  #status-banner {
+    padding-block: 6px;
+  }
+
+  #controls-tip {
+    padding: 3px;
+  }
 }
 
 /* Victory Modal */
