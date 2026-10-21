@@ -10,7 +10,7 @@ A small browser RPG built with HTML, CSS and JavaScript. Open `index.html` in a 
 - Press Shift to dodge in your movement direction (or your facing direction when standing still). A dodge lasts 0.2 seconds, avoids damage, cancels your swing, and has a 1.2-second cooldown shown above the arena.
 - Train at the town dummy to gain attack power. Fight enemies for gold, then swing near a chest to buy a sword that increases your training gains. The 50-gold Common chest has 53% Common, 39% Rare, 5% Epic and 3% Legendary odds. The 150-gold Rare chest has 40% Common, 45% Rare, 10% Epic and 5% Legendary odds.
 - Travel right through the five battle areas. Earlier encounters are optional; you can return left to town and revisit areas to farm gold.
-- Defeat the boss in Area 5, then walk through the right-hand gate and pay 500 gold to finish the adventure. The boss drops 1,000 gold.
+- Defeat Vorgath the Merciless in Area 5, then walk through the right-hand gate and pay 500 gold to finish the adventure. Vorgath drops 1,000 gold.
 - Use **Start a new adventure** on the victory screen to reset your run. Progress is currently held in memory and resets on reload.
 
 ## Monster combat

@@ -131,7 +131,8 @@ function updateEffects() {
 
 // --- Game State ---
 const FINAL_ZONE = 5;
-const WELCOME_MESSAGE = "Welcome to Town! Train on the dummy, buy swords, then defeat the boss and escape through the toll gate.";
+const BOSS_NAME = "Vorgath the Merciless";
+const WELCOME_MESSAGE = `Welcome to Town! Train on the dummy, buy swords, then defeat ${BOSS_NAME} and escape through the toll gate.`;
 const createInitialState = () => ({
   zone: 0,
   gold: 0,
@@ -219,7 +220,7 @@ function completeAdventure() {
   player.dodgeTimer = 0;
   effects = [];
   updateHUD();
-  showStatus("Adventure complete! The boss is defeated and the final toll is paid.");
+  showStatus(`Adventure complete! ${BOSS_NAME} is defeated and the final toll is paid.`);
   document.getElementById("victory-summary").textContent = `You escaped with ${state.gold} gold and ${state.totalAttackPower} attack power.`;
   victoryDialog.showModal();
 }
@@ -292,6 +293,7 @@ function spawnZoneEnemies() {
       maxHp: spec.hp,
       atk: spec.atk,
       type: type,
+      name: type === "BOSS" ? BOSS_NAME : type,
       color: spec.color,
       goldValue: spec.gold,
       homeX: homeX,
@@ -371,7 +373,7 @@ function triggerAttack() {
         enemy.hp = 0;
         resetEnemyCombat(enemy);
         state.gold += enemy.goldValue;
-        showStatus(`Defeated ${enemy.type}! Earned 💰${enemy.goldValue}`);
+        showStatus(`Defeated ${enemy.name}! Earned 💰${enemy.goldValue}`);
         addEffect(point.x, enemy.y - 10, `+${enemy.goldValue} gold`, "#facc15", 50);
         playSound("defeat");
         if (state.zone !== FINAL_ZONE) {
@@ -447,7 +449,7 @@ function updatePlayer() {
     if (state.zone === FINAL_ZONE) {
       player.x = canvas.width - player.size - 10;
       if (enemies.some(enemy => enemy.hp > 0)) {
-        showStatus("The final gate is locked. Defeat the boss first!");
+        showStatus(`The final gate is locked. Defeat ${BOSS_NAME} first!`);
       } else if (state.gold >= state.tollCost) {
         completeAdventure();
         return;
@@ -810,6 +812,11 @@ function drawEnemies() {
     ctx.font = "bold 11px Courier New";
     ctx.textAlign = "center";
     ctx.fillText(`${enemy.hp}/${enemy.maxHp}`, enemy.x + enemy.size / 2, barY - 4);
+    if (enemy.type === "BOSS") {
+      ctx.fillStyle = "#fca5a5";
+      ctx.font = "bold 12px Courier New";
+      ctx.fillText(enemy.name, enemy.x + enemy.size / 2, barY - 18);
+    }
     ctx.textAlign = "left";
   });
 }
@@ -896,7 +903,7 @@ function render() {
   if (state.zone === 0) {
     drawTown();
   } else {
-    const areaNames = { 1: "GOBLIN GROVE", 2: "ORC STRONGHOLD", 3: "KNIGHT CITADEL", 4: "DARK KEEP", 5: "BOSS LAIR" };
+    const areaNames = { 1: "GOBLIN GROVE", 2: "ORC STRONGHOLD", 3: "KNIGHT CITADEL", 4: "DARK KEEP", 5: "VORGATH'S LAIR" };
     ctx.fillStyle = "#89b69a";
     ctx.font = "bold 12px Courier New";
     ctx.fillText(`${areaNames[state.zone]}  ·  ${enemies.filter(enemy => enemy.hp > 0).length} remaining`, 18, 25);
@@ -929,7 +936,7 @@ function updateCombatHUD() {
 }
 
 function updateHUD() {
-  const zones = ["Town (Safe Area)", "Area 1: Goblins", "Area 2: Orcs", "Area 3: Knights", "Area 4: Dark Knights", "Area 5: BOSS ARENA"];
+  const zones = ["Town (Safe Area)", "Area 1: Goblins", "Area 2: Orcs", "Area 3: Knights", "Area 4: Dark Knights", `Area 5: ${BOSS_NAME}`];
   document.getElementById("zone-title").textContent = `Zone: ${zones[state.zone] || "Area " + state.zone}`;
   document.getElementById("gold-display").textContent = `💰 Gold: ${state.gold}`;
   document.getElementById("hp-text").textContent = `${state.hp}/${state.maxHp}`;
@@ -938,15 +945,15 @@ function updateHUD() {
     ? "Adventure complete. Well fought!"
     : state.zone === FINAL_ZONE
       ? enemies.some(enemy => enemy.hp > 0)
-        ? "Defeat the boss to unlock the final gate."
-        : `Boss defeated! Walk right and pay ${state.tollCost} gold to escape.`
+        ? `Defeat ${BOSS_NAME} to unlock the final gate.`
+        : `${BOSS_NAME} defeated! Walk right and pay ${state.tollCost} gold to escape.`
       : state.zone === 2
         ? "Orcs mark a smash circle. Move clear or Shift-dodge, then punish the recovery."
       : state.zone === 3
         ? "Knight shields block the front. Dodge behind them or attack when their shield drops."
       : state.zone > 0
         ? "Watch the amber attack cone. Step aside or Shift-dodge, then strike back."
-        : "Train, collect better swords, then defeat the boss in Area 5.";
+        : `Train, collect better swords, then defeat ${BOSS_NAME} in Area 5.`;
   
   const hpPct = Math.max(0, (state.hp / state.maxHp) * 100);
   document.getElementById("player-hp-bar-fill").style.width = `${hpPct}%`;

@@ -65,7 +65,7 @@ test('final gate cannot be bought past a living boss', () => {
   assert.equal(game.run('state.zone'), 5);
   assert.equal(game.run('state.gold'), 1000);
   assert.equal(game.run('state.won'), false);
-  assert.match(game.element('status-banner').textContent, /Defeat the boss/);
+  assert.match(game.element('status-banner').textContent, /Defeat Vorgath the Merciless/);
 });
 
 test('insufficient toll keeps a defeated-boss run playable', () => {
@@ -100,7 +100,7 @@ test('full route, actual boss kill, reward, toll and restart work together', () 
   game.run('state.totalAttackPower = 3500; player.x = 500; player.y = 100; triggerAttack();');
   assert.equal(game.run('enemies[0].hp'), 0);
   assert.equal(game.run('state.gold'), 1000);
-  assert.match(game.element('objective-text').textContent, /Boss defeated/);
+  assert.match(game.element('objective-text').textContent, /Vorgath the Merciless defeated/);
   game.run('player.x = 780; updatePlayer();');
   assert.equal(game.run('state.won'), true);
   assert.equal(game.run('state.gold'), 500);
@@ -560,7 +560,7 @@ for (const [zone, type] of monsterZones) {
     assert.equal(game.run('state.gold'),reward);
     if(zone===5) {
       assert.equal(game.run('enemies[0].hp'),0);
-      assert.match(game.element('objective-text').textContent,/Boss defeated/);
+      assert.match(game.element('objective-text').textContent,/Vorgath the Merciless defeated/);
     } else {
       assert.equal(game.run('enemies[0].hp'),game.run('enemies[0].maxHp'));
       assert.equal(game.run('enemies[0].hitFlash'),0);
